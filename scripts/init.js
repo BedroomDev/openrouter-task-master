@@ -897,7 +897,7 @@ function setupMCPConfiguration(targetDir, projectName) {
 			env: {
 				ANTHROPIC_API_KEY: 'YOUR_ANTHROPIC_API_KEY',
 				PERPLEXITY_API_KEY: 'YOUR_PERPLEXITY_API_KEY',
-				MODEL: 'claude-3-7-sonnet-20250219',
+				MODEL: 'anthropic/claude-3.7-sonnet:beta',
 				PERPLEXITY_MODEL: 'sonar-pro',
 				MAX_TOKENS: 64000,
 				TEMPERATURE: 0.2,

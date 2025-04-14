@@ -141,9 +141,11 @@ export async function addTaskDirect(args, log, context = {}) {
 			// Initialize AI client with session environment
 			let localAnthropic;
 			try {
+				log.info('Initializing OpenRouter client for task creation');
 				localAnthropic = getAnthropicClientForMCP(session, log);
+				log.info('OpenRouter client initialized successfully');
 			} catch (error) {
-				log.error(`Failed to initialize Anthropic client: ${error.message}`);
+				log.error(`Failed to initialize OpenRouter client: ${error.message}`);
 				disableSilentMode();
 				return {
 					success: false,
@@ -156,12 +158,14 @@ export async function addTaskDirect(args, log, context = {}) {
 
 			// Get model configuration from session
 			const modelConfig = getModelConfig(session);
+			log.info(`Using model: ${modelConfig.model} with temperature: ${modelConfig.temperature}`);
 
 			// Read existing tasks to provide context
 			let tasksData;
 			try {
 				const fs = await import('fs');
 				tasksData = JSON.parse(fs.readFileSync(tasksPath, 'utf8'));
+				log.info(`Successfully read ${tasksData.tasks.length} existing tasks for context`);
 			} catch (error) {
 				log.warn(`Could not read existing tasks for context: ${error.message}`);
 				tasksData = { tasks: [] };
@@ -172,10 +176,15 @@ export async function addTaskDirect(args, log, context = {}) {
 				prompt,
 				tasksData.tasks
 			);
+			
+			log.info('Prepared prompt for task creation');
+			log.debug(`System prompt length: ${systemPrompt.length} chars`);
+			log.debug(`User prompt length: ${userPrompt.length} chars`);
 
 			// Make the AI call using the streaming helper
 			let responseText;
 			try {
+				log.info('Making OpenRouter API call to generate task...');
 				responseText = await _handleAnthropicStream(
 					localAnthropic,
 					{
@@ -189,8 +198,12 @@ export async function addTaskDirect(args, log, context = {}) {
 						mcpLog: log
 					}
 				);
+				log.info(`Received response text (${responseText.length} chars)`);
 			} catch (error) {
 				log.error(`AI processing failed: ${error.message}`);
+				if (error.stack) {
+					log.debug(`Error stack: ${error.stack}`);
+				}
 				disableSilentMode();
 				return {
 					success: false,
@@ -204,9 +217,12 @@ export async function addTaskDirect(args, log, context = {}) {
 			// Parse the AI response
 			let taskDataFromAI;
 			try {
+				log.info('Parsing AI response to extract task data...');
 				taskDataFromAI = parseTaskJsonResponse(responseText);
+				log.info(`Successfully parsed task data with title: "${taskDataFromAI.title}"`);
 			} catch (error) {
 				log.error(`Failed to parse AI response: ${error.message}`);
+				log.debug(`Response text was: ${responseText.substring(0, 200)}...`);
 				disableSilentMode();
 				return {
 					success: false,

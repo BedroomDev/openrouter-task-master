@@ -131,7 +131,7 @@ jest.mock('../../../scripts/modules/utils.js', () => ({
 	enableSilentMode: mockEnableSilentMode,
 	disableSilentMode: mockDisableSilentMode,
 	CONFIG: {
-		model: 'claude-3-7-sonnet-20250219',
+		model: 'anthropic/claude-3.7-sonnet:beta',
 		maxTokens: 64000,
 		temperature: 0.2,
 		defaultSubtasks: 5

@@ -4,6 +4,7 @@
  */
 
 import { Anthropic } from '@anthropic-ai/sdk';
+import { OpenAI } from 'openai';
 import dotenv from 'dotenv';
 
 // Load environment variables for CLI mode
@@ -11,21 +12,21 @@ dotenv.config();
 
 // Default model configuration from CLI environment
 const DEFAULT_MODEL_CONFIG = {
-	model: 'claude-3-7-sonnet-20250219',
+	model: 'anthropic/claude-3.7-sonnet', // OpenRouter model path format without beta suffix
 	maxTokens: 64000,
 	temperature: 0.2
 };
 
 /**
- * Get an Anthropic client instance initialized with MCP session environment variables
+ * Get an OpenRouter client instance configured to use Anthropic models via OpenAI SDK
  * @param {Object} [session] - Session object from MCP containing environment variables
  * @param {Object} [log] - Logger object to use (defaults to console)
- * @returns {Anthropic} Anthropic client instance
+ * @returns {OpenAI} OpenAI client instance configured for OpenRouter
  * @throws {Error} If API key is missing
  */
 export function getAnthropicClientForMCP(session, log = console) {
 	try {
-		// Extract API key from session.env or fall back to environment variables
+		// Continue using ANTHROPIC_API_KEY but connect to OpenRouter
 		const apiKey =
 			session?.env?.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
 
@@ -35,15 +36,32 @@ export function getAnthropicClientForMCP(session, log = console) {
 			);
 		}
 
-		// Initialize and return a new Anthropic client
-		return new Anthropic({
-			apiKey,
+		// Project identification for OpenRouter analytics
+		const siteUrl = session?.env?.YOUR_SITE_URL || process.env.YOUR_SITE_URL || 'https://task-master-ai.app';
+		const siteName = session?.env?.YOUR_SITE_NAME || process.env.YOUR_SITE_NAME || 'Task Master AI';
+
+		log.info(`Initializing OpenRouter client with ANTHROPIC_API_KEY (length: ${apiKey.length})`);
+		log.debug(`OpenRouter client configuration: baseURL=https://openrouter.ai/api/v1, siteUrl=${siteUrl}, siteName=${siteName}`);
+
+		// Initialize and return a new OpenAI client configured for OpenRouter
+		const client = new OpenAI({
+			apiKey, // Using ANTHROPIC_API_KEY with OpenRouter
+			baseURL: 'https://openrouter.ai/api/v1',
 			defaultHeaders: {
-				'anthropic-beta': 'output-128k-2025-02-19' // Include header for increased token limit
+				'HTTP-Referer': siteUrl,
+				'X-Title': siteName
 			}
 		});
+
+		// Verify the client was properly created
+		if (!client || !client.chat || !client.chat.completions) {
+			throw new Error('OpenRouter client was not properly initialized');
+		}
+
+		log.info('OpenRouter client successfully initialized');
+		return client;
 	} catch (error) {
-		log.error(`Failed to initialize Anthropic client: ${error.message}`);
+		log.error(`Failed to initialize OpenRouter client: ${error.message}`);
 		throw error;
 	}
 }
@@ -113,23 +131,37 @@ export async function getBestAvailableAIModel(
 ) {
 	const { requiresResearch = false, claudeOverloaded = false } = options;
 
-	// Test case: When research is needed but no Perplexity, use Claude
-	if (
-		requiresResearch &&
-		!(session?.env?.PERPLEXITY_API_KEY || process.env.PERPLEXITY_API_KEY) &&
-		(session?.env?.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY)
-	) {
+	// Check if Anthropic API key is available (now used for OpenRouter)
+	if (session?.env?.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY) {
 		try {
-			log.warn('Perplexity not available for research, using Claude');
 			const client = getAnthropicClientForMCP(session, log);
-			return { type: 'claude', client };
+			
+			// Select the appropriate model based on requirements
+			let modelName = 'anthropic/claude-3.7-sonnet'; // Default model
+			
+			if (requiresResearch) {
+				// For research tasks, prefer a larger model
+				modelName = 'anthropic/claude-3.7-sonnet';
+			}
+			
+			if (claudeOverloaded) {
+				// If Claude is overloaded, try another model through OpenRouter
+				log.warn('Claude appears to be overloaded, using alternative model');
+				modelName = 'openai/gpt-4o'; // Alternative model
+			}
+			
+			return { 
+				type: 'claude',
+				client, 
+				modelName 
+			};
 		} catch (error) {
-			log.error(`Claude not available: ${error.message}`);
-			throw new Error('No AI models available for research');
+			log.error(`OpenRouter not available: ${error.message}`);
+			// Fall through to Perplexity as backup if available
 		}
 	}
 
-	// Regular path: Perplexity for research when available
+	// Fallback to Perplexity for research if OpenRouter is not available
 	if (
 		requiresResearch &&
 		(session?.env?.PERPLEXITY_API_KEY || process.env.PERPLEXITY_API_KEY)
@@ -139,40 +171,7 @@ export async function getBestAvailableAIModel(
 			return { type: 'perplexity', client };
 		} catch (error) {
 			log.warn(`Perplexity not available: ${error.message}`);
-			// Fall through to Claude as backup
-		}
-	}
-
-	// Test case: Claude for overloaded scenario
-	if (
-		claudeOverloaded &&
-		(session?.env?.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY)
-	) {
-		try {
-			log.warn(
-				'Claude is overloaded but no alternatives are available. Proceeding with Claude anyway.'
-			);
-			const client = getAnthropicClientForMCP(session, log);
-			return { type: 'claude', client };
-		} catch (error) {
-			log.error(
-				`Claude not available despite being overloaded: ${error.message}`
-			);
-			throw new Error('No AI models available');
-		}
-	}
-
-	// Default case: Use Claude when available and not overloaded
-	if (
-		!claudeOverloaded &&
-		(session?.env?.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY)
-	) {
-		try {
-			const client = getAnthropicClientForMCP(session, log);
-			return { type: 'claude', client };
-		} catch (error) {
-			log.warn(`Claude not available: ${error.message}`);
-			// Fall through to error if no other options
+			// No more fallbacks available
 		}
 	}
 
@@ -181,33 +180,40 @@ export async function getBestAvailableAIModel(
 }
 
 /**
- * Handle Claude API errors with user-friendly messages
- * @param {Error} error - The error from Claude API
+ * Handle OpenRouter API errors with user-friendly messages
+ * @param {Error} error - The error from OpenRouter API
  * @returns {string} User-friendly error message
  */
 export function handleClaudeError(error) {
-	// Check if it's a structured error response
-	if (error.type === 'error' && error.error) {
-		switch (error.error.type) {
-			case 'overloaded_error':
-				return 'Claude is currently experiencing high demand and is overloaded. Please wait a few minutes and try again.';
-			case 'rate_limit_error':
-				return 'You have exceeded the rate limit. Please wait a few minutes before making more requests.';
-			case 'invalid_request_error':
-				return 'There was an issue with the request format. If this persists, please report it as a bug.';
+	// Check for HTTP error status codes
+	const statusCode = error?.status || error?.statusCode;
+	if (statusCode) {
+		switch (statusCode) {
+			case 429:
+				return 'Rate limit exceeded. Please wait a few minutes before making more requests.';
+			case 402:
+				return 'Insufficient credits. Please add more credits to your OpenRouter account.';
+			case 404:
+				return 'Model not found. Please check the model name.';
+			case 400:
+				return 'Bad request. Please check your request parameters.';
+			case 401:
+				return 'Authentication error. Please check your API key.';
+			case 500:
+				return 'OpenRouter server error. Please try again later.';
 			default:
-				return `Claude API error: ${error.error.message}`;
+				return `OpenRouter API error (${statusCode}): ${error.message}`;
 		}
 	}
 
 	// Check for network/timeout errors
 	if (error.message?.toLowerCase().includes('timeout')) {
-		return 'The request to Claude timed out. Please try again.';
+		return 'The request to OpenRouter timed out. Please try again.';
 	}
 	if (error.message?.toLowerCase().includes('network')) {
-		return 'There was a network error connecting to Claude. Please check your internet connection and try again.';
+		return 'There was a network error connecting to OpenRouter. Please check your internet connection and try again.';
 	}
 
 	// Default error message
-	return `Error communicating with Claude: ${error.message}`;
+	return `Error communicating with OpenRouter: ${error.message}`;
 }

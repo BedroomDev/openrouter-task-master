@@ -1,5 +1,31 @@
-
 # Claude Task Master - Product Requirements Document
+
+***WICHTIG: Bitte antworte nur mit einem validen JSON-Objekt, das genau 15 Tasks enthält, keine zusätzlichen Erklärungen oder Markdown. Die Aufgabe ist, die unten beschriebene PRD in strukturierte Entwicklungsaufgaben zu übersetzen.***
+
+Format:
+```json
+{
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Task Title",
+      "description": "Brief task description",
+      "status": "pending",
+      "dependencies": [0],
+      "priority": "high|medium|low",
+      "details": "Detailed implementation instructions",
+      "testStrategy": "Verification approach details"
+    },
+    // Weitere Tasks...
+  ],
+  "metadata": {
+    "projectName": "Task Master",
+    "totalTasks": 15,
+    "sourceFile": "scripts/prd.txt",
+    "generatedAt": "2023-06-01"
+  }
+}
+```
 
 <PRD>
 # Technical Architecture  
@@ -515,7 +541,7 @@ Consider security, performance, maintainability, and user experience in your rec
 ### Anthropic API Configuration
 - Authentication: ANTHROPIC_API_KEY environment variable
 - Model selection: MODEL environment variable
-- Default model: claude-3-7-sonnet-20250219
+- Default model: anthropic/claude-3.7-sonnet:beta
 - Maximum tokens: MAX_TOKENS environment variable (default: 4000)
 - Temperature: TEMPERATURE environment variable (default: 0.7)
 

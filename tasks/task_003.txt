@@ -1,18 +1,11 @@
 # Task ID: 3
-# Title: Implement Basic Task Operations
-# Status: done
+# Title: Implementiere Aufgaben-Löschfunktion
+# Status: pending
 # Dependencies: 1
-# Priority: high
-# Description: Create core functionality for managing tasks including listing, creating, updating, and deleting tasks.
+# Priority: medium
+# Description: Erstelle eine Funktion, die es Benutzern ermöglicht, Aufgaben aus dem System zu löschen.
 # Details:
-Implement the following task operations:
-- List tasks with filtering options
-- Create new tasks with required fields
-- Update existing task properties
-- Delete tasks
-- Change task status (pending/done/deferred)
-- Handle dependencies between tasks
-- Manage task priorities
+Die Funktion soll eine Aufgaben-ID als Eingabe akzeptieren und die entsprechende Aufgabe aus der Datenverwaltung entfernen.
 
 # Test Strategy:
-Test each operation with valid and invalid inputs. Verify that dependencies are properly tracked and that status changes are reflected correctly in the tasks.json file.
+Teste, ob Aufgaben korrekt gelöscht werden und die Änderung in der JSON-Datei gespeichert wird.

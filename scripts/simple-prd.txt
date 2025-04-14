@@ -1,0 +1,16 @@
+# Simple Test PRD
+
+Erstelle ein einfaches Programm mit folgenden Funktionen:
+
+1. Benutzer können Aufgaben hinzufügen
+2. Benutzer können Aufgaben als erledigt markieren
+3. Benutzer können Aufgaben löschen
+4. Benutzer können alle Aufgaben anzeigen
+5. Die Daten werden in einer JSON-Datei gespeichert
+
+Technologien:
+- Node.js
+- Express für ein einfaches API
+- Datei-basierte Speicherung
+
+Die Anwendung soll als einfaches Kommandozeilenprogramm implementiert werden. 

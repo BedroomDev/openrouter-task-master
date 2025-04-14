@@ -37,7 +37,7 @@ npm i -g task-master-ai
 			"env": {
 				"ANTHROPIC_API_KEY": "YOUR_ANTHROPIC_API_KEY_HERE",
 				"PERPLEXITY_API_KEY": "YOUR_PERPLEXITY_API_KEY_HERE",
-				"MODEL": "claude-3-7-sonnet-20250219",
+				"MODEL": "anthropic/claude-3.7-sonnet:beta",
 				"PERPLEXITY_MODEL": "sonar-pro",
 				"MAX_TOKENS": 64000,
 				"TEMPERATURE": 0.2,

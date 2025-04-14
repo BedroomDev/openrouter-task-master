@@ -5,8 +5,7 @@
 
 // NOTE/TODO: Include the beta header output-128k-2025-02-19 in your API request to increase the maximum output token length to 128k tokens for Claude 3.7 Sonnet.
 
-import { Anthropic } from '@anthropic-ai/sdk';
-import OpenAI from 'openai';
+import { OpenAI } from 'openai';
 import dotenv from 'dotenv';
 import { CONFIG, log, sanitizePrompt, isSilentMode } from './utils.js';
 import { startLoadingIndicator, stopLoadingIndicator } from './ui.js';
@@ -15,14 +14,73 @@ import chalk from 'chalk';
 // Load environment variables
 dotenv.config();
 
-// Configure Anthropic client
-const anthropic = new Anthropic({
-	apiKey: process.env.ANTHROPIC_API_KEY,
-	// Add beta header for 128k token output
-	defaultHeaders: {
-		'anthropic-beta': 'output-128k-2025-02-19'
+// Legacy Anthropic client reference (to be removed once migration is complete)
+// This is kept as a placeholder to catch any legacy code still trying to use it directly
+const anthropic = {
+	messages: {
+		create: async (params) => {
+			// Instead of throwing an error, redirect the request to OpenRouter
+			if (!params) {
+				throw new Error('No parameters provided for Anthropic API call');
+			}
+			
+			// Get client from OpenRouter
+			const client = getAnthropicClient();
+			
+			// Convert Anthropic parameters to OpenRouter format
+			const messages = [];
+			
+			// Add system message if present
+			if (params.system) {
+				messages.push({
+					role: 'system',
+					content: params.system
+				});
+			}
+			
+			// Add user message(s)
+			if (params.messages && Array.isArray(params.messages)) {
+				params.messages.forEach(msg => messages.push(msg));
+			}
+			
+			// Handle streaming vs non-streaming
+			if (params.stream) {
+				return client.chat.completions.create({
+					model: 'anthropic/claude-3.7-sonnet',
+					messages,
+					temperature: params.temperature || 0.2,
+					max_tokens: params.max_tokens || 4000,
+					stream: true
+				});
+			} else {
+				const response = await client.chat.completions.create({
+					model: 'anthropic/claude-3.7-sonnet',
+					messages,
+					temperature: params.temperature || 0.2,
+					max_tokens: params.max_tokens || 4000
+				});
+				
+				// Format response to match Anthropic's expected format
+				return {
+					content: response.choices[0].message.content,
+					model: response.model,
+					usage: response.usage
+				};
+			}
+		}
+	},
+	// Hinzufügen der chat.completions-Struktur, die von _handleAnthropicStream erwartet wird
+	chat: {
+		completions: {
+			create: async (params) => {
+				// Get client with OpenRouter
+				const client = getAnthropicClient();
+				// Direkt an den echten OpenAI-kompatiblen Client weiterleiten
+				return client.chat.completions.create(params);
+			}
+		}
 	}
-});
+};
 
 // Lazy-loaded Perplexity client
 let perplexity = null;
@@ -147,6 +205,8 @@ function handleClaudeError(error) {
  *   - reportProgress: Function to report progress to MCP server (optional)
  *   - mcpLog: MCP logger object (optional)
  *   - session: Session object from MCP server (optional)
+ *   - forceJsonOnly: Boolean flag to force strict JSON-only response (optional)
+ *   - systemPrompt: Custom system prompt to override default (optional)
  * @param {Object} aiClient - AI client instance (optional - will use default if not provided)
  * @param {Object} modelConfig - Model configuration (optional)
  * @returns {Object} Claude's response
@@ -156,7 +216,7 @@ async function callClaude(
 	prdPath,
 	numTasks,
 	retryCount = 0,
-	{ reportProgress, mcpLog, session } = {},
+	{ reportProgress, mcpLog, session, forceJsonOnly = false, systemPrompt = null } = {},
 	aiClient = null,
 	modelConfig = null
 ) {
@@ -164,8 +224,46 @@ async function callClaude(
 		log('info', 'Calling Claude...');
 
 		// Build the system prompt
-		const systemPrompt = `You are an AI assistant helping to break down a Product Requirements Document (PRD) into a set of sequential development tasks. 
+		let finalSystemPrompt;
+		
+		if (systemPrompt) {
+			// Use provided custom system prompt if available
+			finalSystemPrompt = systemPrompt;
+		} else if (forceJsonOnly) {
+			// Use strict JSON-only prompt for retries or when explicitly requested
+			finalSystemPrompt = `You are an AI assistant generating a structured task list from a PRD document.
+YOUR RESPONSE MUST BE VALID JSON ONLY. DO NOT include any explanations, markdown formatting, or non-JSON content.
+
+Generate exactly ${numTasks} tasks that follow this schema:
+{
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Short, clear title",
+      "description": "Brief description",
+      "status": "pending",
+      "dependencies": [],
+      "priority": "high|medium|low",
+      "details": "Implementation notes",
+      "testStrategy": "Testing approach"
+    },
+    // Additional tasks with sequential IDs...
+  ],
+  "metadata": {
+    "projectName": "PRD Implementation",
+    "totalTasks": ${numTasks},
+    "sourceFile": "${prdPath}",
+    "generatedAt": "YYYY-MM-DD"
+  }
+}
+
+IMPORTANT: Return ONLY the JSON. No comments, no explanations, no markdown code blocks.`;
+		} else {
+			// Use the original detailed system prompt
+			finalSystemPrompt = `You are an AI assistant helping to break down a Product Requirements Document (PRD) into a set of sequential development tasks. 
 Your goal is to create ${numTasks} well-structured, actionable development tasks based on the PRD provided.
+
+IMPORTANT: RETURN ONLY VALID JSON WITHOUT ANY EXPLANATION OR MARKDOWN. DO NOT WRAP YOUR RESPONSE IN CODE BLOCKS. DO NOT INCLUDE ANY TEXT BEFORE OR AFTER THE JSON.
 
 Each task should follow this JSON structure:
 {
@@ -192,7 +290,7 @@ Guidelines:
 10. Focus on filling in any gaps left by the PRD or areas that aren't fully specified, while preserving all explicit requirements
 11. Always aim to provide the most direct path to implementation, avoiding over-engineering or roundabout approaches
 
-Expected output format:
+Expected output format (EXACTLY THIS FORMAT, NO TEXT BEFORE OR AFTER):
 {
   "tasks": [
     {
@@ -212,18 +310,61 @@ Expected output format:
 }
 
 Important: Your response must be valid JSON only, with no additional explanation or comments.`;
+		}
 
-		// Use streaming request to handle large responses and show progress
-		return await handleStreamingRequest(
-			prdContent,
-			prdPath,
-			numTasks,
-			modelConfig?.maxTokens || CONFIG.maxTokens,
-			systemPrompt,
-			{ reportProgress, mcpLog, session },
-			aiClient || anthropic,
-			modelConfig
-		);
+		const userPrompt = `Here's the Product Requirements Document (PRD) to break down into ${numTasks} tasks:\n\n${prdContent}`;
+
+		// Determine if we should use streaming based on options
+		// If we're retrying or explicitly requesting JSON-only, we might want to avoid streaming
+		const shouldStream = !(forceJsonOnly && retryCount > 0);
+
+		if (shouldStream) {
+			// Use streaming request to handle large responses and show progress
+			return await handleStreamingRequest(
+				prdContent,
+				prdPath,
+				numTasks,
+				modelConfig?.maxTokens || CONFIG.maxTokens,
+				finalSystemPrompt,
+				{ reportProgress, mcpLog, session },
+				aiClient || anthropic,
+				modelConfig
+			);
+		} else {
+			// Use non-streaming request for better JSON control
+			// Get client
+			const client = aiClient || getAnthropicClient(session);
+			
+			// Make direct (non-streaming) request to get cleaner JSON
+			const response = await client.chat.completions.create({
+				model: modelConfig?.model || session?.env?.ANTHROPIC_MODEL || CONFIG.model,
+				messages: [
+					{ role: 'system', content: finalSystemPrompt },
+					{ role: 'user', content: userPrompt }
+				],
+				temperature: modelConfig?.temperature || session?.env?.TEMPERATURE || CONFIG.temperature,
+				max_tokens: modelConfig?.maxTokens || session?.env?.MAX_TOKENS || CONFIG.maxTokens,
+				response_format: { type: "json_object" }  // Explicitly request JSON format
+			});
+			
+			// Extract content from response
+			const responseText = response.choices[0]?.message?.content || '';
+			
+			if (mcpLog) {
+				mcpLog.info('Completed non-streaming response from AI client');
+				mcpLog.debug(`Response text: ${responseText.substring(0, 100)}...`);
+			}
+			
+			// Process the response
+			return processClaudeResponse(
+				responseText, 
+				numTasks, 
+				retryCount, 
+				prdContent, 
+				prdPath, 
+				{ reportProgress, mcpLog, session, forceJsonOnly }
+			);
+		}
 	} catch (error) {
 		// Get user-friendly error message
 		const userMessage = handleClaudeError(error);
@@ -248,7 +389,12 @@ Important: Your response must be valid JSON only, with no additional explanation
 				prdPath,
 				numTasks,
 				retryCount + 1,
-				{ reportProgress, mcpLog, session },
+				{ 
+					reportProgress, 
+					mcpLog, 
+					session, 
+					forceJsonOnly: true  // Force JSON-only on retry
+				},
 				aiClient,
 				modelConfig
 			);
@@ -425,7 +571,7 @@ function processClaudeResponse(
 	prdPath,
 	options = {}
 ) {
-	const { mcpLog } = options;
+	const { mcpLog, forceJsonOnly = false } = options;
 
 	// Determine output format based on mcpLog presence
 	const outputFormat = mcpLog ? 'json' : 'text';
@@ -441,20 +587,236 @@ function processClaudeResponse(
 	};
 
 	try {
-		// Attempt to parse the JSON response
-		let jsonStart = textContent.indexOf('{');
-		let jsonEnd = textContent.lastIndexOf('}');
+		// Log the debug info about the response to help diagnose parsing issues
+		report(`Response length: ${textContent.length} characters`, 'debug');
+		report(`Response preview: ${textContent.substring(0, 150)}...`, 'debug');
 
-		if (jsonStart === -1 || jsonEnd === -1) {
-			throw new Error("Could not find valid JSON in Claude's response");
+		// Try multiple approaches to find valid JSON
+		let jsonContent = null;
+		let parsedData = null;
+		let parseError = null;
+
+		// OpenRouter response is often cleaner, try direct parsing first
+		try {
+			// First try parsing the whole response directly (OpenRouter usually returns clean JSON)
+			report('Attempting to parse entire response as JSON directly...', 'debug');
+			parsedData = JSON.parse(textContent);
+			report('Successfully parsed entire response as JSON', 'debug');
+		} catch (err) {
+			report(`Direct JSON parsing failed: ${err.message}`, 'debug');
+			parseError = err;
 		}
 
-		let jsonContent = textContent.substring(jsonStart, jsonEnd + 1);
-		let parsedData = JSON.parse(jsonContent);
+		// Approach 1: Try to find JSON in a code block
+		if (!parsedData) {
+			try {
+				const codeBlockMatches = textContent.match(/```(?:json)?([^`]+)```/);
+				if (codeBlockMatches && codeBlockMatches[1]) {
+					jsonContent = codeBlockMatches[1].trim();
+					report('Found JSON in code block, attempting to parse...', 'debug');
+					parsedData = JSON.parse(jsonContent);
+					report('Successfully parsed JSON from code block', 'debug');
+				}
+			} catch (err) {
+				report(`Code block parsing failed: ${err.message}`, 'debug');
+				parseError = err;
+			}
+		}
+
+		// Approach 2: Look for an object with curly braces
+		if (!parsedData) {
+			try {
+				let jsonStart = textContent.indexOf('{');
+				let jsonEnd = textContent.lastIndexOf('}');
+				
+				if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
+					jsonContent = textContent.substring(jsonStart, jsonEnd + 1);
+					report(`Found JSON object from position ${jsonStart} to ${jsonEnd}, attempting to parse...`, 'debug');
+					parsedData = JSON.parse(jsonContent);
+					report('Successfully parsed JSON from object boundaries', 'debug');
+				}
+			} catch (err) {
+				report(`Object boundary parsing failed: ${err.message}`, 'debug');
+				parseError = err;
+			}
+		}
+
+		// Approach 3: Look for an array with square brackets
+		if (!parsedData) {
+			try {
+				let arrayStart = textContent.indexOf('[');
+				let arrayEnd = textContent.lastIndexOf(']');
+				
+				if (arrayStart !== -1 && arrayEnd !== -1 && arrayEnd > arrayStart) {
+					jsonContent = textContent.substring(arrayStart, arrayEnd + 1);
+					report(`Found JSON array from position ${arrayStart} to ${arrayEnd}, attempting to parse...`, 'debug');
+					
+					// Parse the array
+					const tasksArray = JSON.parse(jsonContent);
+					
+					// Wrap the array in a tasks object
+					if (Array.isArray(tasksArray)) {
+						parsedData = {
+							tasks: tasksArray,
+							metadata: {
+								projectName: 'PRD Implementation',
+								totalTasks: tasksArray.length,
+								sourceFile: prdPath,
+								generatedAt: new Date().toISOString().split('T')[0]
+							}
+						};
+						report('Successfully parsed JSON array and wrapped it in a tasks object', 'debug');
+					}
+				}
+			} catch (err) {
+				report(`Array boundary parsing failed: ${err.message}`, 'debug');
+				parseError = err;
+			}
+		}
+
+		// Approach 4: More aggressive JSON extraction - search for anything JSON-like
+		if (!parsedData) {
+			try {
+				// Split by common markdown and text elements to isolate potential JSON
+				const lines = textContent.split('\n');
+				let potentialJsonLines = '';
+				let inJsonBlock = false;
+				
+				for (const line of lines) {
+					const trimmedLine = line.trim();
+					
+					// Skip likely non-JSON content
+					if (
+						trimmedLine.startsWith('#') || 
+						trimmedLine.startsWith('>') || 
+						trimmedLine === '' ||
+						trimmedLine.startsWith('Here is') ||
+						trimmedLine.startsWith('I have created')
+					) {
+						continue;
+					}
+					
+					// Detect JSON block start/end markers
+					if (trimmedLine.match(/^\{|\[$/) && !inJsonBlock) {
+						inJsonBlock = true;
+					}
+					
+					if (inJsonBlock) {
+						potentialJsonLines += line + '\n';
+					}
+					
+					if (inJsonBlock && trimmedLine.match(/\}|\]$/)) {
+						inJsonBlock = false;
+					}
+				}
+				
+				// Try to extract the largest JSON-like structure
+				const objectMatch = potentialJsonLines.match(/(\{[^]*\})/s);
+				const arrayMatch = potentialJsonLines.match(/(\[[^]*\])/s);
+				
+				let extracted = '';
+				if (objectMatch && objectMatch[1] && (!arrayMatch || objectMatch[1].length > arrayMatch[1].length)) {
+					extracted = objectMatch[1];
+				} else if (arrayMatch && arrayMatch[1]) {
+					extracted = arrayMatch[1];
+				}
+				
+				if (extracted) {
+					report('Found potential JSON using aggressive extraction, attempting to parse...', 'debug');
+					try {
+						// Try parsing the extracted content
+						parsedData = JSON.parse(extracted);
+						report('Successfully parsed JSON using aggressive extraction', 'debug');
+					} catch (err) {
+						// If direct parsing fails, try fixing common issues
+						const fixedJson = extracted
+							.replace(/,(\s*[\]}])/g, '$1') // Remove trailing commas
+							.replace(/(['"])?([a-zA-Z0-9_]+)(['"])?:/g, '"$2":') // Fix unquoted keys
+							.replace(/`/g, '"') // Replace backticks with quotes
+							.replace(/[\t\r]/g, '') // Remove tabs/carriage returns
+							.replace(/\\'/g, "'"); // Replace escaped single quotes
+						
+						parsedData = JSON.parse(fixedJson);
+						report('Successfully parsed JSON after fixing formatting issues', 'debug');
+					}
+				}
+			} catch (err) {
+				report(`Aggressive extraction parsing failed: ${err.message}`, 'debug');
+				parseError = err;
+			}
+		}
+
+		// If we still don't have valid data, throw an error with detailed info
+		if (!parsedData) {
+			throw new Error(
+				`Could not find valid JSON in response after multiple attempts. ` +
+				`Last parse error: ${parseError ? parseError.message : 'No specific error'}. ` +
+				`Response preview: ${textContent.substring(0, 150)}...`
+			);
+		}
+
+		// Handle direct array result
+		if (Array.isArray(parsedData)) {
+			report('Result is a direct array, wrapping in tasks object', 'debug');
+			parsedData = {
+				tasks: parsedData,
+				metadata: {
+					projectName: 'PRD Implementation',
+					totalTasks: parsedData.length,
+					sourceFile: prdPath,
+					generatedAt: new Date().toISOString().split('T')[0]
+				}
+			};
+		}
 
 		// Validate the structure of the generated tasks
 		if (!parsedData.tasks || !Array.isArray(parsedData.tasks)) {
-			throw new Error("Claude's response does not contain a valid tasks array");
+			// Try to locate tasks array within an unexpected structure
+			if (parsedData.data && parsedData.data.tasks && Array.isArray(parsedData.data.tasks)) {
+				report('Found tasks array nested in data property, extracting...', 'debug');
+				parsedData = {
+					tasks: parsedData.data.tasks,
+					metadata: parsedData.data.metadata || {
+						projectName: 'PRD Implementation',
+						totalTasks: parsedData.data.tasks.length,
+						sourceFile: prdPath,
+						generatedAt: new Date().toISOString().split('T')[0]
+					}
+				};
+			} else {
+				// Look for any array in the parsed data that might be tasks
+				const findTasksArray = (obj) => {
+					if (!obj || typeof obj !== 'object') return null;
+					
+					for (const key in obj) {
+						if (Array.isArray(obj[key]) && obj[key].length > 0 && obj[key][0].title) {
+							report(`Found potential tasks array in property: ${key}`, 'debug');
+							return obj[key];
+						} else if (typeof obj[key] === 'object') {
+							const nested = findTasksArray(obj[key]);
+							if (nested) return nested;
+						}
+					}
+					return null;
+				};
+				
+				const tasksArray = findTasksArray(parsedData);
+				if (tasksArray) {
+					parsedData = {
+						tasks: tasksArray,
+						metadata: {
+							projectName: 'PRD Implementation',
+							totalTasks: tasksArray.length,
+							sourceFile: prdPath,
+							generatedAt: new Date().toISOString().split('T')[0]
+						}
+					};
+				} else {
+					throw new Error(
+						`Response does not contain a valid tasks array. Structure: ${JSON.stringify(Object.keys(parsedData))}`
+					);
+				}
+			}
 		}
 
 		// Ensure we have the correct number of tasks
@@ -477,7 +839,7 @@ function processClaudeResponse(
 
 		return parsedData;
 	} catch (error) {
-		report(`Error processing Claude's response: ${error.message}`, 'error');
+		report(`Error processing response: ${error.message}`, 'error');
 
 		// Retry logic
 		if (retryCount < 2) {
@@ -486,12 +848,19 @@ function processClaudeResponse(
 			// Try again with Claude for a cleaner response
 			if (retryCount === 1) {
 				report('Calling Claude again for a cleaner response...', 'info');
+				// Force JSON-only on retry and use a simpler prompt
 				return callClaude(
 					prdContent,
 					prdPath,
 					numTasks,
 					retryCount + 1,
-					options
+					{
+						...options,
+						forceJsonOnly: true,
+						systemPrompt: `Generate a tasks JSON from the PRD. ONLY OUTPUT VALID JSON. NO MARKDOWN. NO CODE BLOCKS. NO EXPLANATION. JUST THE JSON. 
+Format: {"tasks": [{id:1, title:"", description:"", status:"pending", dependencies:[], priority:"", details:"", testStrategy:""}], 
+"metadata": {projectName:"PRD Implementation", totalTasks:${numTasks}, sourceFile:"${prdPath}", generatedAt:"YYYY-MM-DD"}}`
+					}
 				);
 			}
 
@@ -501,7 +870,7 @@ function processClaudeResponse(
 				retryCount + 1,
 				prdContent,
 				prdPath,
-				options
+				{ ...options, forceJsonOnly: true }
 			);
 		} else {
 			throw error;
@@ -796,18 +1165,15 @@ Note on dependencies: Subtasks can depend on other subtasks with lower IDs. Use 
 
 		try {
 			// Update loading indicator to show streaming progress
-			// Only create if not in silent mode
-			if (!isSilent) {
-				let dotCount = 0;
-				const readline = await import('readline');
-				streamingInterval = setInterval(() => {
-					readline.cursorTo(process.stdout, 0);
-					process.stdout.write(
-						`Generating research-backed subtasks for task ${task.id}${'.'.repeat(dotCount)}`
-					);
-					dotCount = (dotCount + 1) % 4;
-				}, 500);
-			}
+			let dotCount = 0;
+			const readline = await import('readline');
+			streamingInterval = setInterval(() => {
+				readline.cursorTo(process.stdout, 0);
+				process.stdout.write(
+					`Generating research-backed subtasks for task ${task.id}${'.'.repeat(dotCount)}`
+				);
+				dotCount = (dotCount + 1) % 4;
+			}, 500);
 
 			// Use streaming API call via our helper function
 			responseText = await _handleAnthropicStream(
@@ -994,12 +1360,10 @@ IMPORTANT: Make sure to include an analysis for EVERY task listed above, with th
 }
 
 /**
- * Handles streaming API calls to Anthropic (Claude)
- * This is a common helper function to standardize interaction with Anthropic's streaming API.
- *
- * @param {Anthropic} client - Initialized Anthropic client
+ * Handle streaming API calls to OpenRouter using OpenAI client
+ * @param {OpenAI} client - Initialized OpenAI client configured for OpenRouter
  * @param {Object} params - Parameters for the API call
- * @param {string} params.model - Claude model to use (e.g., 'claude-3-opus-20240229')
+ * @param {string} params.model - Model name to use (e.g., 'anthropic/claude-3.7-sonnet')
  * @param {number} params.max_tokens - Maximum tokens for the response
  * @param {number} params.temperature - Temperature for model responses (0.0-1.0)
  * @param {string} [params.system] - Optional system prompt
@@ -1031,14 +1395,14 @@ async function _handleAnthropicStream(
 
 	if (showCLIOutput) {
 		loadingIndicator = startLoadingIndicator(
-			'Processing request with Claude AI...'
+			'Processing request with OpenRouter AI...'
 		);
 	}
 
 	try {
 		// Validate required parameters
 		if (!client) {
-			throw new Error('Anthropic client is required');
+			throw new Error('OpenAI client is required');
 		}
 
 		if (
@@ -1049,45 +1413,52 @@ async function _handleAnthropicStream(
 			throw new Error('At least one message is required');
 		}
 
-		// Ensure the stream parameter is set
-		const streamParams = {
-			...params,
+		// Convert any system message to OpenAI format
+		let messages = [...params.messages];
+		if (params.system) {
+			// Add system message if provided
+			messages.unshift({ role: 'system', content: params.system });
+		}
+
+		// Create the OpenRouter/OpenAI compatible parameters
+		const openAIParams = {
+			model: params.model,
+			messages: messages,
+			max_tokens: params.max_tokens || CONFIG.maxTokens,
+			temperature: params.temperature || CONFIG.temperature,
 			stream: true
 		};
 
-		// Call Anthropic with streaming enabled
-		const stream = await client.messages.create(streamParams);
-
-		// Set up streaming progress indicator for CLI (only if not in silent mode)
-		let dotCount = 0;
-		if (showCLIOutput) {
-			const readline = await import('readline');
-			streamingInterval = setInterval(() => {
-				readline.cursorTo(process.stdout, 0);
-				process.stdout.write(
-					`Receiving streaming response from Claude${'.'.repeat(dotCount)}`
-				);
-				dotCount = (dotCount + 1) % 4;
-			}, 500);
+		// Log the request parameters
+		if (mcpLog) {
+			mcpLog.debug(`OpenRouter request parameters: ${JSON.stringify(openAIParams)}`);
+		} else if (!isSilent) {
+			log('debug', `OpenRouter request parameters: ${JSON.stringify(openAIParams)}`);
 		}
 
-		// Process the stream
-		let streamIterator = stream[Symbol.asyncIterator]();
-		let streamDone = false;
+		try {
+			// Call OpenRouter via OpenAI client with streaming enabled
+			const stream = await client.chat.completions.create(openAIParams);
 
-		while (!streamDone) {
-			try {
-				const { done, value: chunk } = await streamIterator.next();
+			// Set up streaming progress indicator for CLI (only if not in silent mode)
+			let dotCount = 0;
+			if (showCLIOutput) {
+				const readline = await import('readline');
+				streamingInterval = setInterval(() => {
+					readline.cursorTo(process.stdout, 0);
+					process.stdout.write(
+						`Receiving streaming response from OpenRouter${'.'.repeat(dotCount)}`
+					);
+					dotCount = (dotCount + 1) % 4;
+				}, 500);
+			}
 
-				// Check if we've reached the end of the stream
-				if (done) {
-					streamDone = true;
-					continue;
-				}
-
-				// Process the chunk
-				if (chunk && chunk.type === 'content_block_delta' && chunk.delta.text) {
-					responseText += chunk.delta.text;
+			// Process the stream - format differs from Anthropic's
+			for await (const chunk of stream) {
+				// Extract the text from the chunk (OpenAI format)
+				const content = chunk.choices[0]?.delta?.content || '';
+				if (content) {
+					responseText += content;
 				}
 
 				// Report progress - use only mcpLog in MCP context and avoid direct reportProgress calls
@@ -1111,46 +1482,55 @@ async function _handleAnthropicStream(
 						`Progress: ${progressPercent}% (${responseText.length} chars generated)`
 					);
 				}
-			} catch (iterError) {
-				// Handle iteration errors
-				if (mcpLog) {
-					mcpLog.error(`Stream iteration error: ${iterError.message}`);
-				} else if (!isSilent) {
-					log('error', `Stream iteration error: ${iterError.message}`);
-				}
-
-				// If it's a "stream finished" error, just break the loop
-				if (
-					iterError.message?.includes('finished') ||
-					iterError.message?.includes('closed')
-				) {
-					streamDone = true;
-				} else {
-					// For other errors, rethrow
-					throw iterError;
-				}
 			}
-		}
 
-		// Cleanup - ensure intervals are cleared
-		if (streamingInterval) {
-			clearInterval(streamingInterval);
-			streamingInterval = null;
-		}
+			// Cleanup - ensure intervals are cleared
+			if (streamingInterval) {
+				clearInterval(streamingInterval);
+				streamingInterval = null;
+			}
 
-		if (loadingIndicator) {
-			stopLoadingIndicator(loadingIndicator);
-			loadingIndicator = null;
-		}
+			if (loadingIndicator) {
+				stopLoadingIndicator(loadingIndicator);
+				loadingIndicator = null;
+			}
 
-		// Log completion
-		if (mcpLog) {
-			mcpLog.info('Completed streaming response from Claude API!');
-		} else if (!isSilent) {
-			log('info', 'Completed streaming response from Claude API!');
-		}
+			// Log completion
+			if (mcpLog) {
+				mcpLog.info('Completed streaming response from OpenRouter API!');
+			} else if (!isSilent) {
+				log('info', 'Completed streaming response from OpenRouter API!');
+			}
 
-		return responseText;
+			return responseText;
+		} catch (error) {
+			// Try non-streaming fallback if streaming fails
+			if (mcpLog) {
+				mcpLog.warn(`Streaming failed, trying non-streaming fallback: ${error.message}`);
+			} else if (!isSilent) {
+				log('warn', `Streaming failed, trying non-streaming fallback: ${error.message}`);
+			}
+			
+			// Modify params to disable streaming
+			const nonStreamParams = {
+				...openAIParams,
+				stream: false
+			};
+			
+			// Make non-streaming request
+			const response = await client.chat.completions.create(nonStreamParams);
+			
+			// Extract content from response
+			responseText = response.choices[0]?.message?.content || '';
+			
+			if (mcpLog) {
+				mcpLog.info('Non-streaming fallback successful');
+			} else if (!isSilent) {
+				log('info', 'Non-streaming fallback successful');
+			}
+			
+			return responseText;
+		}
 	} catch (error) {
 		// Cleanup on error
 		if (streamingInterval) {
@@ -1163,15 +1543,20 @@ async function _handleAnthropicStream(
 			loadingIndicator = null;
 		}
 
-		// Log the error
+		// Log the error with additional debug info
+		const errorMessage = `Error in OpenRouter: ${error.message}`;
+		const errorDetails = JSON.stringify(error, Object.getOwnPropertyNames(error));
+		
 		if (mcpLog) {
-			mcpLog.error(`Error in Anthropic streaming: ${error.message}`);
+			mcpLog.error(errorMessage);
+			mcpLog.debug(`Error details: ${errorDetails}`);
 		} else if (!isSilent) {
-			log('error', `Error in Anthropic streaming: ${error.message}`);
+			log('error', errorMessage);
+			log('debug', `Error details: ${errorDetails}`);
 		}
 
 		// Re-throw with context
-		throw new Error(`Anthropic streaming error: ${error.message}`);
+		throw new Error(`OpenRouter streaming error: ${error.message}`);
 	}
 }
 
@@ -1259,16 +1644,12 @@ function _buildAddTaskPrompt(prompt, contextTasks, { newTaskId } = {}) {
 }
 
 /**
- * Get an Anthropic client instance
- * @param {Object} [session] - Optional session object from MCP
- * @returns {Anthropic} Anthropic client instance
+ * Get an initialized OpenAI client configured for OpenRouter to handle Anthropic models
+ * @param {Object} session - Optional session object containing environment variables
+ * @returns {OpenAI} Initialized OpenAI client
+ * @throws {Error} If API key is missing
  */
 function getAnthropicClient(session) {
-	// If we already have a global client and no session, use the global
-	if (!session && anthropic) {
-		return anthropic;
-	}
-
 	// Initialize a new client with API key from session or environment
 	const apiKey =
 		session?.env?.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
@@ -1279,12 +1660,20 @@ function getAnthropicClient(session) {
 		);
 	}
 
-	return new Anthropic({
-		apiKey: apiKey,
-		// Add beta header for 128k token output
+	// Project identification for OpenRouter analytics
+	const siteUrl = session?.env?.YOUR_SITE_URL || process.env.YOUR_SITE_URL || 'https://task-master-ai.app';
+	const siteName = session?.env?.YOUR_SITE_NAME || process.env.YOUR_SITE_NAME || 'Task Master AI';
+
+	// Return new OpenAI client configured for OpenRouter with increased timeout
+	return new OpenAI({
+		apiKey,
+		baseURL: 'https://openrouter.ai/api/v1',
 		defaultHeaders: {
-			'anthropic-beta': 'output-128k-2025-02-19'
-		}
+			'HTTP-Referer': siteUrl,
+			'X-Title': siteName
+		},
+		timeout: 180000, // 3 minutes timeout instead of default 60 seconds
+		maxRetries: 3    // Increase retries for better reliability
 	});
 }
 
@@ -1381,26 +1770,29 @@ Return a JSON object with the following structure:
 				);
 				dotCount = (dotCount + 1) % 4;
 			}, 500);
-
-			// Use streaming API call
-			const stream = await anthropic.messages.create({
+			
+			// Get OpenAI client configured for OpenRouter
+			const client = getAnthropicClient(session);
+			
+			// Create OpenAI format parameters for OpenRouter
+			const openAIParams = {
 				model: session?.env?.ANTHROPIC_MODEL || CONFIG.model,
 				max_tokens: session?.env?.MAX_TOKENS || CONFIG.maxTokens,
 				temperature: session?.env?.TEMPERATURE || CONFIG.temperature,
-				system: systemPrompt,
 				messages: [
-					{
-						role: 'user',
-						content: userPrompt
-					}
+					{ role: 'system', content: systemPrompt },
+					{ role: 'user', content: userPrompt }
 				],
 				stream: true
-			});
-
+			};
+			
+			// Create stream with OpenAI client (OpenRouter)
+			const stream = await client.chat.completions.create(openAIParams);
+			
 			// Process the stream
 			for await (const chunk of stream) {
-				if (chunk.type === 'content_block_delta' && chunk.delta.text) {
-					responseText += chunk.delta.text;
+				if (chunk.choices && chunk.choices[0] && chunk.choices[0].delta.content) {
+					responseText += chunk.choices[0].delta.content;
 				}
 				if (reportProgress) {
 					await reportProgress({
@@ -1435,13 +1827,13 @@ Return a JSON object with the following structure:
 }
 
 /**
- * Get a configured Anthropic client for MCP
+ * Get a configured OpenAI client for OpenRouter
  * @param {Object} session - Session object from MCP
- * @param {Object} log - Logger object
- * @returns {Anthropic} - Configured Anthropic client
+ * @param {Object} customEnv - Custom environment variables
+ * @returns {OpenAI} - Configured OpenAI client for OpenRouter
  */
 function getConfiguredAnthropicClient(session = null, customEnv = null) {
-	// If we have a session with ANTHROPIC_API_KEY in env, use that
+	// Verwende nur ANTHROPIC_API_KEY aus der Session oder Umgebung
 	const apiKey =
 		session?.env?.ANTHROPIC_API_KEY ||
 		process.env.ANTHROPIC_API_KEY ||
@@ -1453,18 +1845,33 @@ function getConfiguredAnthropicClient(session = null, customEnv = null) {
 		);
 	}
 
-	return new Anthropic({
-		apiKey: apiKey,
-		// Add beta header for 128k token output
+	// Project identification for OpenRouter analytics
+	const siteUrl = 
+		session?.env?.YOUR_SITE_URL || 
+		process.env.YOUR_SITE_URL || 
+		customEnv?.YOUR_SITE_URL || 
+		'https://task-master-ai.app';
+	
+	const siteName = 
+		session?.env?.YOUR_SITE_NAME || 
+		process.env.YOUR_SITE_NAME || 
+		customEnv?.YOUR_SITE_NAME || 
+		'Task Master AI';
+
+	// Return new OpenAI client configured for OpenRouter
+	return new OpenAI({
+		apiKey,
+		baseURL: 'https://openrouter.ai/api/v1',
 		defaultHeaders: {
-			'anthropic-beta': 'output-128k-2025-02-19'
+			'HTTP-Referer': siteUrl,
+			'X-Title': siteName
 		}
 	});
 }
 
 /**
- * Send a chat request to Claude with context management
- * @param {Object} client - Anthropic client
+ * Send a chat request to OpenRouter with context management
+ * @param {Object} client - OpenAI client configured for OpenRouter
  * @param {Object} params - Chat parameters
  * @param {Object} options - Options containing reportProgress, mcpLog, silentMode, and session
  * @returns {string} - Response text

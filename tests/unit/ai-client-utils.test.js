@@ -169,7 +169,7 @@ describe('AI Client Utilities', () => {
 
 			// Verify
 			expect(config).toEqual({
-				model: 'claude-3-7-sonnet-20250219',
+				model: 'anthropic/claude-3.7-sonnet:beta',
 				maxTokens: 64000,
 				temperature: 0.2
 			});

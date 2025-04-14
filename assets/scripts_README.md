@@ -26,7 +26,7 @@ The script can be configured through environment variables in a `.env` file at t
 
 ### Optional Configuration
 
-- `MODEL`: Specify which Claude model to use (default: "claude-3-7-sonnet-20250219")
+- `MODEL`: Specify which Claude model to use (default: "anthropic/claude-3.7-sonnet:beta")
 - `MAX_TOKENS`: Maximum tokens for model responses (default: 4000)
 - `TEMPERATURE`: Temperature for model responses (default: 0.7)
 - `PERPLEXITY_API_KEY`: Your Perplexity API key for research-backed subtask generation

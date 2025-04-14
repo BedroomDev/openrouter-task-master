@@ -1,16 +1,11 @@
 # Task ID: 2
-# Title: Develop Command Line Interface Foundation
-# Status: done
+# Title: Implementiere Aufgaben als erledigt markieren
+# Status: pending
 # Dependencies: 1
-# Priority: high
-# Description: Create the basic CLI structure using Commander.js with command parsing and help documentation.
+# Priority: medium
+# Description: Erstelle eine Funktion, die es Benutzern ermöglicht, bestehende Aufgaben als erledigt zu markieren.
 # Details:
-Implement the CLI foundation including:
-- Set up Commander.js for command parsing
-- Create help documentation for all commands
-- Implement colorized console output for better readability
-- Add logging system with configurable levels
-- Handle global options (--help, --version, --file, --quiet, --debug, --json)
+Die Funktion soll eine Aufgaben-ID als Eingabe akzeptieren und den Status der entsprechenden Aufgabe auf 'erledigt' setzen.
 
 # Test Strategy:
-Test each command with various parameters to ensure proper parsing. Verify help documentation is comprehensive and accurate. Test logging at different verbosity levels.
+Teste, ob der Status einer Aufgabe korrekt aktualisiert wird und die Änderung in der JSON-Datei gespeichert wird.

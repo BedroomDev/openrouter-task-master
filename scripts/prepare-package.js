@@ -86,17 +86,36 @@ function syncTemplateFiles() {
 
 // Function to increment version
 function incrementVersion(currentVersion, type = 'patch') {
-	const [major, minor, patch] = currentVersion.split('.').map(Number);
+	// Handle custom version suffixes like "0.11.9-custom-1"
+	const hasCustomSuffix = currentVersion.includes('-');
+	let versionBase, customSuffix = '';
+	
+	if (hasCustomSuffix) {
+		const parts = currentVersion.split('-');
+		versionBase = parts[0];
+		customSuffix = `-${parts.slice(1).join('-')}`;
+	} else {
+		versionBase = currentVersion;
+	}
 
+	const [major, minor, patch] = versionBase.split('.').map(Number);
+
+	let newVersionBase;
 	switch (type) {
 		case 'major':
-			return `${major + 1}.0.0`;
+			newVersionBase = `${major + 1}.0.0`;
+			break;
 		case 'minor':
-			return `${major}.${minor + 1}.0`;
+			newVersionBase = `${major}.${minor + 1}.0`;
+			break;
 		case 'patch':
 		default:
-			return `${major}.${minor}.${patch + 1}`;
+			newVersionBase = `${major}.${minor}.${patch + 1}`;
+			break;
 	}
+
+	// Return with custom suffix if it existed in the original version
+	return hasCustomSuffix ? `${newVersionBase}${customSuffix}` : newVersionBase;
 }
 
 // Main function to prepare the package

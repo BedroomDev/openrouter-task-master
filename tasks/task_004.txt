@@ -1,11 +1,11 @@
 # Task ID: 4
-# Title: Implementiere Aufgabenanzeige
+# Title: Implement task listing functionality
 # Status: pending
 # Dependencies: 1
-# Priority: high
-# Description: Erstelle eine Funktion, die alle vorhandenen Aufgaben anzeigt.
+# Priority: medium
+# Description: Create functionality to display all tasks in the system
 # Details:
-Die Funktion soll alle Aufgaben aus der Datenverwaltung abrufen und in einem übersichtlichen Format in der Kommandozeile darstellen.
+Implement function that retrieves and displays all tasks with their details (ID, description, status). Should handle empty task lists appropriately.
 
 # Test Strategy:
-Teste, ob alle Aufgaben korrekt angezeigt werden, einschließlich ihres Status.
+Test with empty list and with multiple tasks. Verify all task information is correctly displayed.

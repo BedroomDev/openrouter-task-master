@@ -62,6 +62,9 @@ importers:
       ora:
         specifier: ^8.2.0
         version: 8.2.0
+      task-master-ai:
+        specifier: file:task-master-ai-0.11.10-custom-1.tgz
+        version: file:task-master-ai-0.11.10-custom-1.tgz(@types/node@22.14.1)
       uuid:
         specifier: ^11.1.0
         version: 11.1.0
@@ -2227,6 +2230,12 @@ packages:
   supports-preserve-symlinks-flag@1.0.0:
     resolution: {integrity: sha512-ot0WnXS9fgdkgIcePe6RHNk1WA8+muPa6cSjeR3V8K27q9BB1rTE3R1p7Hv0z1ZyAc8s6Vvv8DIyWf681MAt0w==}
     engines: {node: '>= 0.4'}
+
+  task-master-ai@file:task-master-ai-0.11.10-custom-1.tgz:
+    resolution: {integrity: sha512-ppOOFuqHPx6jZ1Y1I+riaaZKHvR4hbJdBdiv33CsVQsx/5L8h+PbrBswTYRkCtPPHhP6+HRqsk0f7QfC+2g9Ew==, tarball: file:task-master-ai-0.11.10-custom-1.tgz}
+    version: 0.11.10-custom-1
+    engines: {node: '>=14.0.0'}
+    hasBin: true
 
   term-size@2.2.1:
     resolution: {integrity: sha512-wK0Ri4fOGjv/XPy8SBHZChl8CM7uMc5VML7SqiQ0zG7+J5Vr+RMQDoHa2CNT6KHUnTGIXH34UDMkPzAUyapBZg==}
@@ -5040,6 +5049,37 @@ snapshots:
       has-flag: 4.0.0
 
   supports-preserve-symlinks-flag@1.0.0: {}
+
+  task-master-ai@file:task-master-ai-0.11.10-custom-1.tgz(@types/node@22.14.1):
+    dependencies:
+      '@anthropic-ai/sdk': 0.39.0
+      boxen: 8.0.1
+      chalk: 4.1.2
+      cli-table3: 0.6.5
+      commander: 11.1.0
+      cors: 2.8.5
+      dotenv: 16.5.0
+      express: 4.21.2
+      fastmcp: 1.21.0
+      figlet: 1.8.1
+      fuse.js: 7.1.0
+      gradient-string: 3.0.0
+      helmet: 8.1.0
+      inquirer: 12.5.2(@types/node@22.14.1)
+      jsonwebtoken: 9.0.2
+      lru-cache: 10.4.3
+      openai: 4.93.0(zod@3.24.2)
+      ora: 8.2.0
+      uuid: 11.1.0
+      zod: 3.24.2
+    transitivePeerDependencies:
+      - '@types/node'
+      - '@valibot/to-json-schema'
+      - arktype
+      - effect
+      - encoding
+      - supports-color
+      - ws
 
   term-size@2.2.1: {}
 

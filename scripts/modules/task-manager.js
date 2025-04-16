@@ -719,6 +719,9 @@ async function updateTaskById(
 			// Only log to console if not in silent mode and outputFormat is 'text'
 			log(level, message);
 		}
+		
+		// IMMER in die Konsole loggen
+		console.log(`[TASK-UPDATE][${level.toUpperCase()}] ${message}`);
 	};
 
 	try {
@@ -880,14 +883,15 @@ Guidelines:
 3. Update the description, details, and test strategy to reflect the new information
 4. Do not change anything unnecessarily - just adapt what needs to change based on the prompt
 5. Return a complete valid JSON object representing the updated task
-6. VERY IMPORTANT: Preserve all subtasks marked as "done" or "completed" - do not modify their content
-7. For tasks with completed subtasks, build upon what has already been done rather than rewriting everything
-8. If an existing completed subtask needs to be changed/undone based on the new context, DO NOT modify it directly
-9. Instead, add a new subtask that clearly indicates what needs to be changed or replaced
-10. Use the existence of completed subtasks as an opportunity to make new subtasks more specific and targeted
-11. Ensure any new subtasks have unique IDs that don't conflict with existing ones
+6. VERY IMPORTANT: ONLY RETURN VALID JSON, no markdown formatting, no backticks, no explanations
+7. Preserve all subtasks marked as "done" or "completed" - do not modify their content
+8. For tasks with completed subtasks, build upon what has already been done rather than rewriting everything
+9. If an existing completed subtask needs to be changed/undone based on the new context, DO NOT modify it directly
+10. Instead, add a new subtask that clearly indicates what needs to be changed or replaced
+11. Use the existence of completed subtasks as an opportunity to make new subtasks more specific and targeted
+12. Ensure any new subtasks have unique IDs that don't conflict with existing ones
 
-The changes described in the prompt should be thoughtfully applied to make the task more accurate and actionable.`;
+Your response MUST be valid JSON only without any extra text.`;
 
 		const taskData = JSON.stringify(taskToUpdate, null, 2);
 
@@ -986,6 +990,10 @@ Return only the updated task as a valid JSON object.`
 						const jsonEnd = responseText.lastIndexOf('}');
 
 						if (jsonStart === -1 || jsonEnd === -1) {
+							report(
+								`JSON error in response ${responseText})`,
+								'info'
+							);
 							throw new Error(
 								`Could not find valid JSON object in ${modelType}'s response. The response may be malformed.`
 							);
@@ -1071,6 +1079,10 @@ Return only the updated task as a valid JSON object.`
 							const jsonEnd = responseText.lastIndexOf('}');
 
 							if (jsonStart === -1 || jsonEnd === -1) {
+								report(
+									`JSON error in response ${responseText})`,
+									'info'
+								);
 								throw new Error(
 									`Could not find valid JSON object in ${modelType}'s response. The response may be malformed.`
 								);

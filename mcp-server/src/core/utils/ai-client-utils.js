@@ -6,15 +6,21 @@
 import { Anthropic } from '@anthropic-ai/sdk';
 import { OpenAI } from 'openai';
 import dotenv from 'dotenv';
+import logger from '../../logger.js';
 
 // Load environment variables for CLI mode
 dotenv.config();
 
+// Default configuration for AI interactions
+const DEFAULT_MAX_TOKENS = 64000;
+const DEFAULT_TEMPERATURE = 0.2;
+const DEFAULT_MODEL = 'anthropic/claude-3.7-sonnet';
+
 // Default model configuration from CLI environment
 const DEFAULT_MODEL_CONFIG = {
-	model: 'anthropic/claude-3.7-sonnet', // OpenRouter model path format without beta suffix
-	maxTokens: 64000,
-	temperature: 0.2
+	model: DEFAULT_MODEL,
+	maxTokens: DEFAULT_MAX_TOKENS,
+	temperature: DEFAULT_TEMPERATURE
 };
 
 /**

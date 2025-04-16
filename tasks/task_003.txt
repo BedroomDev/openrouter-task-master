@@ -1,11 +1,11 @@
 # Task ID: 3
-# Title: Implementiere Aufgaben-Löschfunktion
+# Title: Implement task deletion
 # Status: pending
 # Dependencies: 1
 # Priority: medium
-# Description: Erstelle eine Funktion, die es Benutzern ermöglicht, Aufgaben aus dem System zu löschen.
+# Description: Enable users to delete tasks from the system
 # Details:
-Die Funktion soll eine Aufgaben-ID als Eingabe akzeptieren und die entsprechende Aufgabe aus der Datenverwaltung entfernen.
+Implement function to remove a task from the collection by its identifier. Should handle attempts to delete non-existent tasks gracefully.
 
 # Test Strategy:
-Teste, ob Aufgaben korrekt gelöscht werden und die Änderung in der JSON-Datei gespeichert wird.
+Test deleting existing and non-existing tasks. Verify task is properly removed from storage.

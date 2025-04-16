@@ -1,11 +1,11 @@
 # Task ID: 1
-# Title: Implementiere Aufgaben-Hinzufügen Funktionalität
+# Title: Implement task addition functionality
 # Status: pending
 # Dependencies: None
 # Priority: high
-# Description: Erstelle eine Funktion, die es Benutzern ermöglicht, neue Aufgaben zum System hinzuzufügen.
+# Description: Create functionality that allows users to add new tasks to the system
 # Details:
-Die Funktion soll Benutzereingaben über die Kommandozeile entgegennehmen und neue Aufgaben zur Datenverwaltung hinzufügen.
+Implement a function that accepts task details as input and adds it to the task collection. The task-addition functionality should include a CLI-Schnittstelle with interactive prompts using the inquirer library for enhanced user interaction. The function should collect these task attributes: title (required), description (optional), priority (high/medium/low), and dependencies (IDs of other tasks). Input validation should ensure that the title is not empty and that specified dependencies exist. The function should validate input and assign a unique identifier to each task.
 
 # Test Strategy:
-Teste, ob neue Aufgaben korrekt hinzugefügt werden und in der JSON-Datei gespeichert werden.
+Test with valid and invalid inputs. Verify tasks are properly stored with correct attributes.

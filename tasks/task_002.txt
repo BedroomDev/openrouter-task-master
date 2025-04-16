@@ -1,11 +1,11 @@
 # Task ID: 2
-# Title: Implementiere Aufgaben als erledigt markieren
+# Title: Implement task completion marking
 # Status: pending
 # Dependencies: 1
 # Priority: medium
-# Description: Erstelle eine Funktion, die es Benutzern ermöglicht, bestehende Aufgaben als erledigt zu markieren.
+# Description: Allow users to mark tasks as completed
 # Details:
-Die Funktion soll eine Aufgaben-ID als Eingabe akzeptieren und den Status der entsprechenden Aufgabe auf 'erledigt' setzen.
+Create functionality to update a task's status from pending to completed. Should verify task exists before updating.
 
 # Test Strategy:
-Teste, ob der Status einer Aufgabe korrekt aktualisiert wird und die Änderung in der JSON-Datei gespeichert wird.
+Test marking existing and non-existing tasks. Verify status changes are persisted correctly.

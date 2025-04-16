@@ -290,7 +290,7 @@ Guidelines:
 10. Focus on filling in any gaps left by the PRD or areas that aren't fully specified, while preserving all explicit requirements
 11. Always aim to provide the most direct path to implementation, avoiding over-engineering or roundabout approaches
 
-Expected output format (EXACTLY THIS FORMAT, NO TEXT BEFORE OR AFTER):
+Expected output format (EXACTLY THIS FORMAT, NO TEXT BEFORE OR AFTER, NO MARKDOWN, NO CODE BLOCKS):
 {
   "tasks": [
     {
@@ -309,7 +309,7 @@ Expected output format (EXACTLY THIS FORMAT, NO TEXT BEFORE OR AFTER):
   }
 }
 
-Important: Your response must be valid JSON only, with no additional explanation or comments.`;
+EXTREMELY IMPORTANT: YOUR ENTIRE RESPONSE MUST BE VALID JSON ONLY. DO NOT ADD ANY EXPLANATIONS, COMMENTS, OR CODE BLOCKS. RETURN JUST THE JSON.`;
 		}
 
 		const userPrompt = `Here's the Product Requirements Document (PRD) to break down into ${numTasks} tasks:\n\n${prdContent}`;
@@ -584,9 +584,26 @@ function processClaudeResponse(
 			// Only log to console if not in silent mode and outputFormat is 'text'
 			log(level, message);
 		}
+		
+		// Immer in die Konsole ausgeben, unabhängig vom Silent-Modus (für Debugging)
+		console.log(`[${level.toUpperCase()}] ${message}`);
 	};
 
 	try {
+		// Schreibe die vollständige Antwort in eine Datei für die Analyse
+		const fs = require('fs');
+		const debugDir = './debug';
+		if (!fs.existsSync(debugDir)) {
+			fs.mkdirSync(debugDir, { recursive: true });
+		}
+		fs.writeFileSync(`${debugDir}/claude_response_${Date.now()}.txt`, textContent, 'utf8');
+		report(`Saved Claude response to ${debugDir}/claude_response_${Date.now()}.txt for analysis`, 'info');
+		
+		// ENHANCED LOGGING: Log the full response for debugging
+		report(`FULL RESPONSE TEXT START ----------------------`, 'info');
+		report(`${textContent.substring(0, 500)}...`, 'info'); // Nur die ersten 500 Zeichen ausgeben
+		report(`FULL RESPONSE TEXT END ------------------------`, 'info');
+		
 		// Log the debug info about the response to help diagnose parsing issues
 		report(`Response length: ${textContent.length} characters`, 'debug');
 		report(`Response preview: ${textContent.substring(0, 150)}...`, 'debug');
@@ -614,12 +631,15 @@ function processClaudeResponse(
 				if (codeBlockMatches && codeBlockMatches[1]) {
 					jsonContent = codeBlockMatches[1].trim();
 					report('Found JSON in code block, attempting to parse...', 'debug');
+					report(`Code block content: ${jsonContent}`, 'debug');
 					parsedData = JSON.parse(jsonContent);
 					report('Successfully parsed JSON from code block', 'debug');
+				} else {
+					report('No JSON code blocks found in response', 'debug');
 				}
 			} catch (err) {
 				report(`Code block parsing failed: ${err.message}`, 'debug');
-				parseError = err;
+					parseError = err;
 			}
 		}
 
@@ -632,13 +652,33 @@ function processClaudeResponse(
 				if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
 					jsonContent = textContent.substring(jsonStart, jsonEnd + 1);
 					report(`Found JSON object from position ${jsonStart} to ${jsonEnd}, attempting to parse...`, 'debug');
+					report(`Object content: ${jsonContent.substring(0, 150)}...`, 'debug');
 					parsedData = JSON.parse(jsonContent);
 					report('Successfully parsed JSON from object boundaries', 'debug');
+				} else {
+					report('No complete JSON object with curly braces found', 'debug');
 				}
 			} catch (err) {
 				report(`Object boundary parsing failed: ${err.message}`, 'debug');
 				parseError = err;
 			}
+		}
+
+		// ENHANCED LOGGING: Check for unterminated strings or objects
+		if (!parsedData) {
+			// Check for unterminated strings
+			const quoteCount = (textContent.match(/"/g) || []).length;
+			report(`Quote count in response: ${quoteCount} (should be even)`, 'debug');
+			
+			// Check for balanced braces
+			const openBraces = (textContent.match(/\{/g) || []).length;
+			const closeBraces = (textContent.match(/\}/g) || []).length;
+			report(`Brace count: ${openBraces} opening, ${closeBraces} closing (should be equal)`, 'debug');
+			
+			// Check for balanced brackets
+			const openBrackets = (textContent.match(/\[/g) || []).length;
+			const closeBrackets = (textContent.match(/\]/g) || []).length;
+			report(`Bracket count: ${openBrackets} opening, ${closeBrackets} closing (should be equal)`, 'debug');
 		}
 
 		// Approach 3: Look for an array with square brackets
@@ -1251,27 +1291,119 @@ function parseSubtasksFromText(text, startId, expectedCount, parentTaskId) {
 		throw new Error('Empty text provided, cannot parse subtasks');
 	}
 
-	// Locate JSON array in the text
-	const jsonStartIndex = text.indexOf('[');
-	const jsonEndIndex = text.lastIndexOf(']');
+	// Try various approaches to extract the JSON
+	let subtasks = null;
+	let extractionAttempts = 0;
+	const maxAttempts = 4;
 
-	// If no valid JSON array found, throw error
-	if (
-		jsonStartIndex === -1 ||
-		jsonEndIndex === -1 ||
-		jsonEndIndex < jsonStartIndex
-	) {
-		throw new Error('Could not locate valid JSON array in the response');
+	// First attempt: Try to parse the entire response as JSON directly
+	// This is likely to work with OpenRouter responses which typically return clean JSON
+	try {
+		subtasks = JSON.parse(text.trim());
+		if (Array.isArray(subtasks)) {
+			log('info', 'Successfully parsed full response as JSON array');
+		} else {
+			// If it parsed as an object but not an array, check if it has a tasks property
+			if (subtasks && subtasks.tasks && Array.isArray(subtasks.tasks)) {
+				subtasks = subtasks.tasks;
+				log('info', 'Extracted tasks array from JSON object');
+			} else {
+				// Reset for next attempt
+				subtasks = null;
+			}
+		}
+	} catch (e) {
+		log('debug', `Full text JSON parse failed: ${e.message.substring(0, 100)}`);
 	}
 
-	// Extract and parse the JSON
-	const jsonText = text.substring(jsonStartIndex, jsonEndIndex + 1);
-	let subtasks;
+	// Second attempt: Look for JSON in code blocks
+	if (!subtasks) {
+		extractionAttempts++;
+		const codeBlockMatches = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+		if (codeBlockMatches && codeBlockMatches[1]) {
+			try {
+				subtasks = JSON.parse(codeBlockMatches[1].trim());
+				if (!Array.isArray(subtasks)) {
+					// Check if we got an object with a tasks array
+					if (subtasks && subtasks.tasks && Array.isArray(subtasks.tasks)) {
+						subtasks = subtasks.tasks;
+					} else {
+						subtasks = null;
+					}
+				}
+			} catch (e) {
+				log('debug', `Code block JSON parse failed: ${e.message.substring(0, 100)}`);
+			}
+		}
+	}
 
-	try {
-		subtasks = JSON.parse(jsonText);
-	} catch (parseError) {
-		throw new Error(`Failed to parse JSON: ${parseError.message}`);
+	// Third attempt: Look for array with square brackets
+	if (!subtasks) {
+		extractionAttempts++;
+		const jsonStartIndex = text.indexOf('[');
+		const jsonEndIndex = text.lastIndexOf(']');
+
+		if (jsonStartIndex !== -1 && jsonEndIndex !== -1 && jsonEndIndex > jsonStartIndex) {
+			const jsonText = text.substring(jsonStartIndex, jsonEndIndex + 1);
+			try {
+				subtasks = JSON.parse(jsonText);
+				if (!Array.isArray(subtasks)) {
+					subtasks = null;
+				}
+			} catch (e) {
+				log('debug', `Array extraction parse failed: ${e.message.substring(0, 100)}`);
+			}
+		}
+	}
+
+	// Fourth attempt: Look for object with curly braces - this is a more aggressive JSON extraction
+	if (!subtasks) {
+		extractionAttempts++;
+		const objectStartIndex = text.indexOf('{');
+		const objectEndIndex = text.lastIndexOf('}');
+
+		if (objectStartIndex !== -1 && objectEndIndex !== -1 && objectEndIndex > objectStartIndex) {
+			// Try to find a JSON array within the larger object
+			const subtext = text.substring(objectStartIndex, objectEndIndex + 1);
+			
+			// Look for array patterns within the object
+			const arrayStart = subtext.indexOf('[');
+			const arrayEnd = subtext.lastIndexOf(']');
+			
+			if (arrayStart !== -1 && arrayEnd !== -1 && arrayEnd > arrayStart) {
+				try {
+					const arrayText = subtext.substring(arrayStart, arrayEnd + 1);
+					subtasks = JSON.parse(arrayText);
+					if (!Array.isArray(subtasks)) {
+						subtasks = null;
+					}
+				} catch (e) {
+					log('debug', `Object-embedded array parse failed: ${e.message.substring(0, 100)}`);
+				}
+			}
+			
+			// If we still don't have subtasks, try to parse the whole object
+			if (!subtasks) {
+				try {
+					const parsed = JSON.parse(subtext);
+					// Check if the object has a tasks or subtasks property
+					if (parsed.tasks && Array.isArray(parsed.tasks)) {
+						subtasks = parsed.tasks;
+					} else if (parsed.subtasks && Array.isArray(parsed.subtasks)) {
+						subtasks = parsed.subtasks;
+					}
+				} catch (e) {
+					log('debug', `Full object parse failed: ${e.message.substring(0, 100)}`);
+				}
+			}
+		}
+	}
+
+	// If all attempts failed, throw error
+	if (!subtasks) {
+		throw new Error(
+			`Failed to extract valid JSON array after ${extractionAttempts} attempts. Response length: ${text.length}`
+		);
 	}
 
 	// Validate array
@@ -1385,10 +1517,22 @@ async function _handleAnthropicStream(
 	let loadingIndicator = null;
 	let streamingInterval = null;
 	let responseText = '';
+	let chunkCount = 0;
+	let lastChunkTime = Date.now();
 
 	// Check both the passed parameter and global silent mode using isSilentMode()
 	const isSilent =
 		silentMode || (typeof silentMode === 'undefined' && isSilentMode());
+
+	// Create custom reporter that checks for MCP log and silent mode
+	const report = (message, level = 'info') => {
+		if (mcpLog) {
+			mcpLog[level](message);
+		} else if (!isSilent) {
+			// Only log to console if not in silent mode
+			log(level, message);
+		}
+	};
 
 	// Only show CLI indicators if in cliMode AND not in silent mode
 	const showCLIOutput = cliMode && !isSilent;
@@ -1403,6 +1547,11 @@ async function _handleAnthropicStream(
 		// Validate required parameters
 		if (!client) {
 			throw new Error('OpenAI client is required');
+		}
+
+		// Validate client structure has required methods
+		if (!client.chat || !client.chat.completions || !client.chat.completions.create) {
+			throw new Error('Invalid OpenAI client structure. Missing chat.completions.create method.');
 		}
 
 		if (
@@ -1428,17 +1577,25 @@ async function _handleAnthropicStream(
 			temperature: params.temperature || CONFIG.temperature,
 			stream: true
 		};
-
-		// Log the request parameters
-		if (mcpLog) {
-			mcpLog.debug(`OpenRouter request parameters: ${JSON.stringify(openAIParams)}`);
-		} else if (!isSilent) {
-			log('debug', `OpenRouter request parameters: ${JSON.stringify(openAIParams)}`);
+		
+		// ENHANCED: For update task requests, add response_format to ensure JSON responses
+		if (params.messages.some(msg => msg.content && msg.content.includes('update a software development task'))) {
+			report('Detected update task request, setting response_format to JSON', 'info');
+			openAIParams.response_format = { type: 'json_object' };
 		}
 
+		// Log the request parameters
+		report(`OpenRouter request parameters: ${JSON.stringify(openAIParams)}`, 'debug');
+
 		try {
+			// ENHANCED: Start timing the request
+			const startTime = Date.now();
+			report(`Starting OpenRouter API call at ${new Date(startTime).toISOString()}`, 'debug');
+			
 			// Call OpenRouter via OpenAI client with streaming enabled
+			report('Creating OpenRouter chat completion with streaming enabled', 'debug');
 			const stream = await client.chat.completions.create(openAIParams);
+			report('Stream object obtained, beginning to process chunks', 'debug');
 
 			// Set up streaming progress indicator for CLI (only if not in silent mode)
 			let dotCount = 0;
@@ -1454,11 +1611,32 @@ async function _handleAnthropicStream(
 			}
 
 			// Process the stream - format differs from Anthropic's
+			report('Beginning to process stream chunks', 'debug');
 			for await (const chunk of stream) {
+				chunkCount++;
+				lastChunkTime = Date.now();
+				
+				// Log chunk details periodically
+				if (chunkCount === 1 || chunkCount % 20 === 0) {
+					report(`Processing chunk #${chunkCount}`, 'debug');
+					report(`Chunk structure: ${JSON.stringify(chunk)}`, 'debug');
+				}
+				
 				// Extract the text from the chunk (OpenAI format)
 				const content = chunk.choices[0]?.delta?.content || '';
+				
 				if (content) {
+					// Log content periodically
+					if (chunkCount === 1 || chunkCount % 50 === 0) {
+						report(`Chunk ${chunkCount} content: "${content}"`, 'debug');
+					}
+					
 					responseText += content;
+					
+					// Log accumulated response periodically
+					if (chunkCount % 100 === 0) {
+						report(`Current response (${responseText.length} chars): "${responseText.substring(Math.max(0, responseText.length - 100))}..."`, 'debug');
+					}
 				}
 
 				// Report progress - use only mcpLog in MCP context and avoid direct reportProgress calls
@@ -1477,17 +1655,33 @@ async function _handleAnthropicStream(
 				}
 
 				// Log progress if logger is provided (MCP mode)
-				if (mcpLog) {
-					mcpLog.info(
-						`Progress: ${progressPercent}% (${responseText.length} chars generated)`
+				if (chunkCount % 50 === 0) {
+					report(
+						`Progress: ${progressPercent.toFixed(1)}% (${responseText.length} chars, ${chunkCount} chunks)`
 					);
+				}
+			}
+
+			// ENHANCED: Log timing information
+			const endTime = Date.now();
+			const totalTime = (endTime - startTime) / 1000;
+			report(`Stream complete after ${totalTime.toFixed(2)} seconds. Received ${chunkCount} chunks, ${responseText.length} characters.`, 'info');
+			
+			// Log sample of response
+			if (responseText.length > 0) {
+				if (responseText.length > 500) {
+					report(`Response start: ${responseText.substring(0, 200)}...`, 'debug');
+					report(`Response middle: ...${responseText.substring(Math.floor(responseText.length/2) - 100, Math.floor(responseText.length/2) + 100)}...`, 'debug');
+					report(`Response end: ...${responseText.substring(responseText.length - 200)}`, 'debug');
+				} else {
+					report(`Full response: ${responseText}`, 'debug');
 				}
 			}
 
 			// Cleanup - ensure intervals are cleared
 			if (streamingInterval) {
 				clearInterval(streamingInterval);
-				streamingInterval = null;
+					streamingInterval = null;
 			}
 
 			if (loadingIndicator) {
@@ -1496,37 +1690,52 @@ async function _handleAnthropicStream(
 			}
 
 			// Log completion
-			if (mcpLog) {
-				mcpLog.info('Completed streaming response from OpenRouter API!');
-			} else if (!isSilent) {
-				log('info', 'Completed streaming response from OpenRouter API!');
-			}
+				report('Completed streaming response from OpenRouter API!', 'info');
 
 			return responseText;
 		} catch (error) {
 			// Try non-streaming fallback if streaming fails
-			if (mcpLog) {
-				mcpLog.warn(`Streaming failed, trying non-streaming fallback: ${error.message}`);
-			} else if (!isSilent) {
-				log('warn', `Streaming failed, trying non-streaming fallback: ${error.message}`);
+			report(`Streaming failed, trying non-streaming fallback: ${error.message}`, 'warn');
+			report(`Stream error details: ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`, 'debug');
+			
+			// Additional debugging for specific error types
+			if (error.name === 'TimeoutError' || error.message.includes('timeout')) {
+				report(`Timeout error detected. Last chunk received ${Date.now() - lastChunkTime}ms ago. Total chunks received: ${chunkCount}`, 'warn');
 			}
 			
+			// ENHANCED: For update task, switch to json_object format
 			// Modify params to disable streaming
 			const nonStreamParams = {
 				...openAIParams,
-				stream: false
+				stream: false,
+				response_format: { type: 'json_object' }
 			};
 			
+			report(`Trying non-streaming fallback with params: ${JSON.stringify(nonStreamParams)}`, 'debug');
+			
 			// Make non-streaming request
+			const startTime = Date.now();
+			report(`Starting non-streaming fallback request at ${new Date(startTime).toISOString()}`, 'debug');
+			
 			const response = await client.chat.completions.create(nonStreamParams);
+			
+			const endTime = Date.now();
+			report(`Non-streaming request completed in ${(endTime - startTime) / 1000} seconds`, 'debug');
+			report(`Response structure: ${JSON.stringify(response)}`, 'debug');
 			
 			// Extract content from response
 			responseText = response.choices[0]?.message?.content || '';
 			
-			if (mcpLog) {
-				mcpLog.info('Non-streaming fallback successful');
-			} else if (!isSilent) {
-				log('info', 'Non-streaming fallback successful');
+			report('Non-streaming fallback successful', 'info');
+			report(`Response length: ${responseText.length} characters`, 'debug');
+			
+			if (responseText.length > 0) {
+				if (responseText.length > 500) {
+					report(`Response preview (first 200 chars): ${responseText.substring(0, 200)}...`, 'debug');
+					report(`Response preview (last 200 chars): ...${responseText.substring(responseText.length - 200)}`, 'debug');
+				} else {
+					report(`Full response: ${responseText}`, 'debug');
+				}
 			}
 			
 			return responseText;
@@ -1547,13 +1756,8 @@ async function _handleAnthropicStream(
 		const errorMessage = `Error in OpenRouter: ${error.message}`;
 		const errorDetails = JSON.stringify(error, Object.getOwnPropertyNames(error));
 		
-		if (mcpLog) {
-			mcpLog.error(errorMessage);
-			mcpLog.debug(`Error details: ${errorDetails}`);
-		} else if (!isSilent) {
-			log('error', errorMessage);
-			log('debug', `Error details: ${errorDetails}`);
-		}
+		report(errorMessage, 'error');
+		report(`Error details: ${errorDetails}`, 'debug');
 
 		// Re-throw with context
 		throw new Error(`OpenRouter streaming error: ${error.message}`);
@@ -1665,7 +1869,7 @@ function getAnthropicClient(session) {
 	const siteName = session?.env?.YOUR_SITE_NAME || process.env.YOUR_SITE_NAME || 'Task Master AI';
 
 	// Return new OpenAI client configured for OpenRouter with increased timeout
-	return new OpenAI({
+	const client = new OpenAI({
 		apiKey,
 		baseURL: 'https://openrouter.ai/api/v1',
 		defaultHeaders: {
@@ -1675,6 +1879,41 @@ function getAnthropicClient(session) {
 		timeout: 180000, // 3 minutes timeout instead of default 60 seconds
 		maxRetries: 3    // Increase retries for better reliability
 	});
+
+	// Verify client structure before returning
+	if (!client.chat || !client.chat.completions || !client.chat.completions.create) {
+		log('warn', 'OpenAI client has unexpected structure. Adding completions wrapper.');
+		
+		// Add missing structure if necessary for backward compatibility
+		if (!client.chat) {
+			client.chat = {};
+		}
+		if (!client.chat.completions) {
+			client.chat.completions = {};
+		}
+		if (!client.chat.completions.create) {
+			// Store original client request methods
+			const originalRequest = client.request || (async (params) => {
+				throw new Error('Client has no request method');
+			});
+			
+			// Create a wrapper function that uses the client's underlying request method
+			client.chat.completions.create = async (params) => {
+				try {
+					// Use the client's underlying request mechanism
+					return await originalRequest('POST', '/chat/completions', { data: params });
+				} catch (error) {
+					log('error', `Failed to create completion: ${error.message}`);
+					throw error;
+				}
+			};
+		}
+	}
+
+	// Log successful client creation
+	log('debug', 'Successfully created OpenAI client for OpenRouter');
+
+	return client;
 }
 
 /**
@@ -1859,14 +2098,51 @@ function getConfiguredAnthropicClient(session = null, customEnv = null) {
 		'Task Master AI';
 
 	// Return new OpenAI client configured for OpenRouter
-	return new OpenAI({
+	const client = new OpenAI({
 		apiKey,
 		baseURL: 'https://openrouter.ai/api/v1',
 		defaultHeaders: {
 			'HTTP-Referer': siteUrl,
 			'X-Title': siteName
-		}
+		},
+		timeout: 180000, // 3 minutes timeout
+		maxRetries: 3    // Increase retries for better reliability
 	});
+	
+	// Verify client structure before returning
+	if (!client.chat || !client.chat.completions || !client.chat.completions.create) {
+		log('warn', 'OpenAI client has unexpected structure. Adding completions wrapper.');
+		
+		// Add missing structure if necessary for backward compatibility
+		if (!client.chat) {
+			client.chat = {};
+		}
+		if (!client.chat.completions) {
+			client.chat.completions = {};
+		}
+		if (!client.chat.completions.create) {
+			// Store original client request methods
+			const originalRequest = client.request || (async (params) => {
+				throw new Error('Client has no request method');
+			});
+			
+			// Create a wrapper function that uses the client's underlying request method
+			client.chat.completions.create = async (params) => {
+				try {
+					// Use the client's underlying request mechanism
+					return await originalRequest('POST', '/chat/completions', { data: params });
+				} catch (error) {
+					log('error', `Failed to create completion: ${error.message}`);
+					throw error;
+				}
+			};
+		}
+	}
+
+	// Log successful client creation
+	log('debug', 'Successfully created configured OpenAI client for OpenRouter');
+	
+	return client;
 }
 
 /**
@@ -1924,6 +2200,55 @@ function parseTasksFromCompletion(completionText) {
 	}
 }
 
+// Handle streaming response and text completion from OpenAI
+async function updateOpenAIStream(chatStream, mcpLog, report, progressCallback) {
+	let processedContent = '';
+	let chunkCount = 0;
+	
+	try {
+		report('Starting to receive streaming response...', 'debug');
+		
+		for await (const chunk of chatStream) {
+			chunkCount++;
+			if (chunkCount % 10 === 0) {
+				report(`Received ${chunkCount} chunks so far...`, 'debug');
+			}
+			
+			const content = chunk.choices[0]?.delta?.content || '';
+			if (content) {
+				processedContent += content;
+				
+				// Enhanced logging every few chunks to see content building up
+				if (chunkCount % 50 === 0) {
+					report(`Current accumulated content (${processedContent.length} chars): ${processedContent.substring(processedContent.length - 100)}...`, 'debug');
+				}
+				
+				if (progressCallback) {
+					progressCallback({
+						status: 'receiving',
+						data: { content },
+						progress: 0.5 // We don't know the total progress, so use 0.5
+					});
+				}
+			}
+		}
+		
+		report(`Stream complete, received ${chunkCount} total chunks.`, 'debug');
+		report(`Total response length: ${processedContent.length} characters`, 'debug');
+		
+		// Log the first and last 100 characters to help diagnose issues
+		if (processedContent.length > 0) {
+			report(`Response start: ${processedContent.substring(0, 100)}...`, 'debug');
+			report(`Response end: ...${processedContent.substring(processedContent.length - 100)}`, 'debug');
+		}
+		
+		return processedContent;
+	} catch (error) {
+		report(`Error reading from stream: ${error.message}`, 'error');
+		throw error;
+	}
+}
+
 // Export AI service functions
 export {
 	getAnthropicClient,
@@ -1943,5 +2268,6 @@ export {
 	_handleAnthropicStream,
 	getConfiguredAnthropicClient,
 	sendChatWithContext,
-	parseTasksFromCompletion
+	parseTasksFromCompletion,
+	updateOpenAIStream
 };

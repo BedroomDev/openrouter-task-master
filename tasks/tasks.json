@@ -2,59 +2,64 @@
   "tasks": [
     {
       "id": 1,
-      "title": "Implementiere Aufgaben-Hinzufügen Funktionalität",
-      "description": "Erstelle eine Funktion, die es Benutzern ermöglicht, neue Aufgaben zum System hinzuzufügen.",
+      "title": "Implement task addition functionality",
+      "description": "Create functionality that allows users to add new tasks to the system",
       "status": "pending",
       "dependencies": [],
       "priority": "high",
-      "details": "Die Funktion soll Benutzereingaben über die Kommandozeile entgegennehmen und neue Aufgaben zur Datenverwaltung hinzufügen.",
-      "testStrategy": "Teste, ob neue Aufgaben korrekt hinzugefügt werden und in der JSON-Datei gespeichert werden."
+      "details": "Implement a function that accepts task details as input and adds it to the task collection. The task-addition functionality should include a CLI-Schnittstelle with interactive prompts using the inquirer library for enhanced user interaction. The function should collect these task attributes: title (required), description (optional), priority (high/medium/low), and dependencies (IDs of other tasks). Input validation should ensure that the title is not empty and that specified dependencies exist. The function should validate input and assign a unique identifier to each task.",
+      "testStrategy": "Test with valid and invalid inputs. Verify tasks are properly stored with correct attributes."
     },
     {
       "id": 2,
-      "title": "Implementiere Aufgaben als erledigt markieren",
-      "description": "Erstelle eine Funktion, die es Benutzern ermöglicht, bestehende Aufgaben als erledigt zu markieren.",
+      "title": "Implement task completion marking",
+      "description": "Allow users to mark tasks as completed",
       "status": "pending",
       "dependencies": [
         1
       ],
       "priority": "medium",
-      "details": "Die Funktion soll eine Aufgaben-ID als Eingabe akzeptieren und den Status der entsprechenden Aufgabe auf 'erledigt' setzen.",
-      "testStrategy": "Teste, ob der Status einer Aufgabe korrekt aktualisiert wird und die Änderung in der JSON-Datei gespeichert wird."
+      "details": "Create functionality to update a task's status from pending to completed. Should verify task exists before updating.",
+      "testStrategy": "Test marking existing and non-existing tasks. Verify status changes are persisted correctly."
     },
     {
       "id": 3,
-      "title": "Implementiere Aufgaben-Löschfunktion",
-      "description": "Erstelle eine Funktion, die es Benutzern ermöglicht, Aufgaben aus dem System zu löschen.",
+      "title": "Implement task deletion",
+      "description": "Enable users to delete tasks from the system",
       "status": "pending",
       "dependencies": [
         1
       ],
       "priority": "medium",
-      "details": "Die Funktion soll eine Aufgaben-ID als Eingabe akzeptieren und die entsprechende Aufgabe aus der Datenverwaltung entfernen.",
-      "testStrategy": "Teste, ob Aufgaben korrekt gelöscht werden und die Änderung in der JSON-Datei gespeichert wird."
+      "details": "Implement function to remove a task from the collection by its identifier. Should handle attempts to delete non-existent tasks gracefully.",
+      "testStrategy": "Test deleting existing and non-existing tasks. Verify task is properly removed from storage."
     },
     {
       "id": 4,
-      "title": "Implementiere Aufgabenanzeige",
-      "description": "Erstelle eine Funktion, die alle vorhandenen Aufgaben anzeigt.",
+      "title": "Implement task listing functionality",
+      "description": "Create functionality to display all tasks in the system",
       "status": "pending",
       "dependencies": [
         1
       ],
-      "priority": "high",
-      "details": "Die Funktion soll alle Aufgaben aus der Datenverwaltung abrufen und in einem übersichtlichen Format in der Kommandozeile darstellen.",
-      "testStrategy": "Teste, ob alle Aufgaben korrekt angezeigt werden, einschließlich ihres Status."
+      "priority": "medium",
+      "details": "Implement function that retrieves and displays all tasks with their details (ID, description, status). Should handle empty task lists appropriately.",
+      "testStrategy": "Test with empty list and with multiple tasks. Verify all task information is correctly displayed."
     },
     {
       "id": 5,
-      "title": "Implementiere JSON-Datei Speicherung",
-      "description": "Erstelle ein Modul zur Speicherung und zum Laden von Aufgabendaten in einer JSON-Datei.",
+      "title": "Implement JSON file storage",
+      "description": "Create mechanism to persist tasks in a JSON file",
       "status": "pending",
-      "dependencies": [],
-      "priority": "critical",
-      "details": "Das Modul soll Funktionen zum Lesen und Schreiben von Aufgabendaten in einer JSON-Datei bereitstellen. Es soll sicherstellen, dass Daten persistent gespeichert werden.",
-      "testStrategy": "Teste, ob Daten korrekt in die JSON-Datei geschrieben und aus ihr gelesen werden können. Überprüfe die Datenintegrität bei wiederholten Schreib- und Leseoperationen."
+      "dependencies": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "priority": "high",
+      "details": "Implement functions to read from and write to a JSON file to persist task data between program executions. Should handle file I/O errors gracefully.",
+      "testStrategy": "Test reading/writing with valid and invalid file paths. Verify data persistence across program restarts."
     }
   ],
   "metadata": {

@@ -30,7 +30,7 @@ const warmGradient = gradient(['#fb8b24', '#e36414', '#9a031e']);
  */
 function displayBanner() {
 	console.clear();
-	const bannerText = figlet.textSync('Task Master', {
+	const bannerText = figlet.textSync('Open Task Master', {
 		font: 'Standard',
 		horizontalLayout: 'default',
 		verticalLayout: 'default'
@@ -41,6 +41,9 @@ function displayBanner() {
 	// Add creator credit line below the banner
 	console.log(
 		chalk.dim('by ') + chalk.cyan.underline('https://x.com/eyaltoledano')
+	);
+	console.log(
+		chalk.dim('OpenRouter fork by ') + chalk.cyan.underline('https://aixlab.tech')
 	);
 
 	// Read version directly from package.json

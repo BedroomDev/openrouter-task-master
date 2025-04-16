@@ -1519,6 +1519,8 @@ async function _handleAnthropicStream(
 	let responseText = '';
 	let chunkCount = 0;
 	let lastChunkTime = Date.now();
+	let emptyResponseTimeout = null;
+	let hasReceivedContent = false;
 
 	// Check both the passed parameter and global silent mode using isSilentMode()
 	const isSilent =
@@ -1578,19 +1580,35 @@ async function _handleAnthropicStream(
 			stream: true
 		};
 		
-		// ENHANCED: For update task requests, add response_format to ensure JSON responses
+		// Check content for specific use cases to help format response appropriately
 		if (params.messages.some(msg => msg.content && msg.content.includes('update a software development task'))) {
 			report('Detected update task request, setting response_format to JSON', 'info');
 			openAIParams.response_format = { type: 'json_object' };
+		} else if (params.messages.some(msg => msg.content && 
+		        (msg.content.includes('enhance a subtask') || 
+		         msg.content.includes('provide additional information') ||
+		         msg.content.includes('enhance:\n{')))) {
+			report('Detected subtask update request, setting response_format to text', 'info');
+			openAIParams.response_format = { type: 'text' };
 		}
 
 		// Log the request parameters
-		report(`OpenRouter request parameters: ${JSON.stringify(openAIParams)}`, 'debug');
+		report(`OpenRouter request parameters: ${JSON.stringify({
+			...openAIParams,
+			messages: `[${openAIParams.messages.length} messages]` // Summarize messages to avoid log bloat
+		})}`, 'debug');
 
 		try {
-			// ENHANCED: Start timing the request
+			// Start timing the request
 			const startTime = Date.now();
 			report(`Starting OpenRouter API call at ${new Date(startTime).toISOString()}`, 'debug');
+			
+			// Set a timer to detect if we're not getting any content for too long
+			emptyResponseTimeout = setTimeout(() => {
+				if (!hasReceivedContent) {
+					report('No content received within timeout period, this may indicate an issue', 'warn');
+				}
+			}, 15000); // 15 seconds timeout for initial content
 			
 			// Call OpenRouter via OpenAI client with streaming enabled
 			report('Creating OpenRouter chat completion with streaming enabled', 'debug');
@@ -1616,26 +1634,34 @@ async function _handleAnthropicStream(
 				chunkCount++;
 				lastChunkTime = Date.now();
 				
+				// Log chunk receipt status
+				if (chunkCount === 1) {
+					report(`Received first chunk at ${new Date(lastChunkTime).toISOString()}`, 'debug');
+					// Clear the empty response timeout since we're getting data
+					if (emptyResponseTimeout) {
+						clearTimeout(emptyResponseTimeout);
+						emptyResponseTimeout = null;
+					}
+				}
+				
 				// Log chunk details periodically
 				if (chunkCount === 1 || chunkCount % 20 === 0) {
 					report(`Processing chunk #${chunkCount}`, 'debug');
-					report(`Chunk structure: ${JSON.stringify(chunk)}`, 'debug');
 				}
 				
 				// Extract the text from the chunk (OpenAI format)
 				const content = chunk.choices[0]?.delta?.content || '';
 				
+				// Track if we're getting any actual content
 				if (content) {
-					// Log content periodically
-					if (chunkCount === 1 || chunkCount % 50 === 0) {
-						report(`Chunk ${chunkCount} content: "${content}"`, 'debug');
-					}
-					
+					hasReceivedContent = true;
 					responseText += content;
 					
-					// Log accumulated response periodically
-					if (chunkCount % 100 === 0) {
-						report(`Current response (${responseText.length} chars): "${responseText.substring(Math.max(0, responseText.length - 100))}..."`, 'debug');
+					// Log content periodically (only in verbose debug mode)
+					if (chunkCount === 1) {
+						report(`First content received: "${content.substring(0, 50)}${content.length > 50 ? '...' : ''}"`, 'debug');
+					} else if (chunkCount % 100 === 0) {
+						report(`Current response length: ${responseText.length} chars`, 'debug');
 					}
 				}
 
@@ -1662,26 +1688,41 @@ async function _handleAnthropicStream(
 				}
 			}
 
-			// ENHANCED: Log timing information
+			// Log timing information
 			const endTime = Date.now();
 			const totalTime = (endTime - startTime) / 1000;
 			report(`Stream complete after ${totalTime.toFixed(2)} seconds. Received ${chunkCount} chunks, ${responseText.length} characters.`, 'info');
 			
-			// Log sample of response
-			if (responseText.length > 0) {
-				if (responseText.length > 500) {
-					report(`Response start: ${responseText.substring(0, 200)}...`, 'debug');
-					report(`Response middle: ...${responseText.substring(Math.floor(responseText.length/2) - 100, Math.floor(responseText.length/2) + 100)}...`, 'debug');
-					report(`Response end: ...${responseText.substring(responseText.length - 200)}`, 'debug');
-				} else {
-					report(`Full response: ${responseText}`, 'debug');
+			// Validate response - check if it's empty or suspiciously short
+			if (!hasReceivedContent || responseText.trim() === '') {
+				report('Warning: Received empty response from AI service', 'warn');
+				throw new Error('AI returned empty response');
+			} else if (responseText.length < 10 && !responseText.match(/^\s*\{/)) {
+				// If response is very short and doesn't appear to be valid JSON, it might be truncated
+				report(`Warning: Received suspiciously short response: "${responseText}"`, 'warn');
+				if (!params.messages.some(msg => msg.content && msg.content.includes('yes/no'))) {
+					// Only throw if we're not expecting a short answer like yes/no
+					throw new Error('AI returned suspiciously short response, possibly truncated');
 				}
 			}
+			
+			// Log sample of response
+			if (responseText.length > 500) {
+				report(`Response start: ${responseText.substring(0, 100)}...`, 'debug');
+				report(`Response end: ...${responseText.substring(responseText.length - 100)}`, 'debug');
+			} else {
+				report(`Full response: ${responseText}`, 'debug');
+			}
 
-			// Cleanup - ensure intervals are cleared
+			// Cleanup - ensure intervals and timeouts are cleared
 			if (streamingInterval) {
 				clearInterval(streamingInterval);
-					streamingInterval = null;
+				streamingInterval = null;
+			}
+			
+			if (emptyResponseTimeout) {
+				clearTimeout(emptyResponseTimeout);
+				emptyResponseTimeout = null;
 			}
 
 			if (loadingIndicator) {
@@ -1690,12 +1731,12 @@ async function _handleAnthropicStream(
 			}
 
 			// Log completion
-				report('Completed streaming response from OpenRouter API!', 'info');
+			report('Completed streaming response from OpenRouter API!', 'info');
 
 			return responseText;
 		} catch (error) {
 			// Try non-streaming fallback if streaming fails
-			report(`Streaming failed, trying non-streaming fallback: ${error.message}`, 'warn');
+			report(`Streaming failed: ${error.message}. Trying non-streaming fallback...`, 'warn');
 			report(`Stream error details: ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`, 'debug');
 			
 			// Additional debugging for specific error types
@@ -1703,48 +1744,73 @@ async function _handleAnthropicStream(
 				report(`Timeout error detected. Last chunk received ${Date.now() - lastChunkTime}ms ago. Total chunks received: ${chunkCount}`, 'warn');
 			}
 			
-			// ENHANCED: For update task, switch to json_object format
-			// Modify params to disable streaming
+			// Modify params to disable streaming and try non-streaming
 			const nonStreamParams = {
 				...openAIParams,
-				stream: false,
-				response_format: { type: 'json_object' }
+				stream: false
 			};
 			
-			report(`Trying non-streaming fallback with params: ${JSON.stringify(nonStreamParams)}`, 'debug');
+			// For text-based tasks, ensure we get text back
+			if (params.messages.some(msg => msg.content && 
+			    (msg.content.includes('additional information') || 
+			     msg.content.includes('enhance a subtask') ||
+			     msg.content.includes('subtask to enhance')))) {
+				nonStreamParams.response_format = { type: 'text' };
+				report('Setting non-streaming response format to text for subtask update', 'debug');
+			}
+			
+			report(`Trying non-streaming fallback with params: ${JSON.stringify({
+				...nonStreamParams,
+				messages: `[${nonStreamParams.messages.length} messages]` // Summarize messages
+			})}`, 'debug');
 			
 			// Make non-streaming request
 			const startTime = Date.now();
 			report(`Starting non-streaming fallback request at ${new Date(startTime).toISOString()}`, 'debug');
 			
-			const response = await client.chat.completions.create(nonStreamParams);
-			
-			const endTime = Date.now();
-			report(`Non-streaming request completed in ${(endTime - startTime) / 1000} seconds`, 'debug');
-			report(`Response structure: ${JSON.stringify(response)}`, 'debug');
-			
-			// Extract content from response
-			responseText = response.choices[0]?.message?.content || '';
-			
-			report('Non-streaming fallback successful', 'info');
-			report(`Response length: ${responseText.length} characters`, 'debug');
-			
-			if (responseText.length > 0) {
-				if (responseText.length > 500) {
-					report(`Response preview (first 200 chars): ${responseText.substring(0, 200)}...`, 'debug');
-					report(`Response preview (last 200 chars): ...${responseText.substring(responseText.length - 200)}`, 'debug');
-				} else {
-					report(`Full response: ${responseText}`, 'debug');
+			try {
+				const response = await client.chat.completions.create(nonStreamParams);
+				
+				const endTime = Date.now();
+				report(`Non-streaming request completed in ${(endTime - startTime) / 1000} seconds`, 'debug');
+				
+				// Extract content from response
+				responseText = response.choices[0]?.message?.content || '';
+				
+				// Validate response
+				if (!responseText || responseText.trim() === '') {
+					throw new Error('AI returned empty response from non-streaming request');
 				}
+				
+				report('Non-streaming fallback successful', 'info');
+				report(`Response length: ${responseText.length} characters`, 'debug');
+				
+				if (responseText.length > 0) {
+					if (responseText.length > 500) {
+						report(`Response preview (first 100 chars): ${responseText.substring(0, 100)}...`, 'debug');
+						report(`Response preview (last 100 chars): ...${responseText.substring(responseText.length - 100)}`, 'debug');
+					} else {
+						report(`Full response: ${responseText}`, 'debug');
+					}
+				}
+				
+				return responseText;
+			} catch (fallbackError) {
+				// If both streaming and non-streaming fail, throw a combined error
+				report(`Non-streaming fallback also failed: ${fallbackError.message}`, 'error');
+				throw new Error(`AI service unreachable (tried streaming and non-streaming): ${fallbackError.message}`);
 			}
-			
-			return responseText;
 		}
 	} catch (error) {
 		// Cleanup on error
 		if (streamingInterval) {
 			clearInterval(streamingInterval);
 			streamingInterval = null;
+		}
+		
+		if (emptyResponseTimeout) {
+			clearTimeout(emptyResponseTimeout);
+			emptyResponseTimeout = null;
 		}
 
 		if (loadingIndicator) {
@@ -1754,13 +1820,19 @@ async function _handleAnthropicStream(
 
 		// Log the error with additional debug info
 		const errorMessage = `Error in OpenRouter: ${error.message}`;
-		const errorDetails = JSON.stringify(error, Object.getOwnPropertyNames(error));
-		
 		report(errorMessage, 'error');
-		report(`Error details: ${errorDetails}`, 'debug');
+		
+		// Include diagnostic info with the error
+		error.diagnosticInfo = {
+			chunkCount,
+			responseLength: responseText?.length || 0,
+			hasReceivedContent,
+			model: params.model,
+			timestamp: new Date().toISOString()
+		};
 
 		// Re-throw with context
-		throw new Error(`OpenRouter streaming error: ${error.message}`);
+		throw error;
 	}
 }
 
@@ -2105,8 +2177,11 @@ function getConfiguredAnthropicClient(session = null, customEnv = null) {
 			'HTTP-Referer': siteUrl,
 			'X-Title': siteName
 		},
-		timeout: 180000, // 3 minutes timeout
-		maxRetries: 3    // Increase retries for better reliability
+		timeout: 240000, // 4 minutes timeout (increased from 3 minutes)
+		maxRetries: 3,   // Keep 3 retries
+		defaultQuery: {
+			timeout: 240  // Specify timeout in seconds in the query parameters as well
+		}
 	});
 	
 	// Verify client structure before returning
@@ -2129,8 +2204,12 @@ function getConfiguredAnthropicClient(session = null, customEnv = null) {
 			// Create a wrapper function that uses the client's underlying request method
 			client.chat.completions.create = async (params) => {
 				try {
-					// Use the client's underlying request mechanism
-					return await originalRequest('POST', '/chat/completions', { data: params });
+					// Use the client's underlying request mechanism with longer timeout
+					return await originalRequest('POST', '/chat/completions', { 
+						data: params,
+						timeout: 240000, // Ensure the timeout is applied to this level too
+						maxRetries: 3
+					});
 				} catch (error) {
 					log('error', `Failed to create completion: ${error.message}`);
 					throw error;

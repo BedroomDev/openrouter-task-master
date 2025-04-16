@@ -63,8 +63,8 @@ importers:
         specifier: ^8.2.0
         version: 8.2.0
       task-master-ai:
-        specifier: file:task-master-ai-0.11.10-custom-1.tgz
-        version: file:task-master-ai-0.11.10-custom-1.tgz(@types/node@22.14.1)
+        specifier: file:task-master-ai-0.11.12-custom-2.tgz
+        version: file:task-master-ai-0.11.12-custom-2.tgz(@types/node@22.14.1)
       uuid:
         specifier: ^11.1.0
         version: 11.1.0
@@ -2231,9 +2231,9 @@ packages:
     resolution: {integrity: sha512-ot0WnXS9fgdkgIcePe6RHNk1WA8+muPa6cSjeR3V8K27q9BB1rTE3R1p7Hv0z1ZyAc8s6Vvv8DIyWf681MAt0w==}
     engines: {node: '>= 0.4'}
 
-  task-master-ai@file:task-master-ai-0.11.10-custom-1.tgz:
-    resolution: {integrity: sha512-ppOOFuqHPx6jZ1Y1I+riaaZKHvR4hbJdBdiv33CsVQsx/5L8h+PbrBswTYRkCtPPHhP6+HRqsk0f7QfC+2g9Ew==, tarball: file:task-master-ai-0.11.10-custom-1.tgz}
-    version: 0.11.10-custom-1
+  task-master-ai@file:task-master-ai-0.11.12-custom-2.tgz:
+    resolution: {integrity: sha512-w7D+Y4mFt0OvbbINwJNXELHUxCIfzkC4AIAQHGDQQPLLCYOUocG96uHLP1Leo2eUgXDNJcOFzcUom4daufNdqQ==, tarball: file:task-master-ai-0.11.12-custom-2.tgz}
+    version: 0.11.12-custom-2
     engines: {node: '>=14.0.0'}
     hasBin: true
 
@@ -5050,7 +5050,7 @@ snapshots:
 
   supports-preserve-symlinks-flag@1.0.0: {}
 
-  task-master-ai@file:task-master-ai-0.11.10-custom-1.tgz(@types/node@22.14.1):
+  task-master-ai@file:task-master-ai-0.11.12-custom-2.tgz(@types/node@22.14.1):
     dependencies:
       '@anthropic-ai/sdk': 0.39.0
       boxen: 8.0.1
